@@ -45,6 +45,9 @@ pub struct StackTraceGetter {
     reinit_count: u32,
 }
 
+unsafe impl Send for StackTraceGetter {}
+// unsafe impl Sync for StackTraceGetter {}
+
 impl StackTraceGetter {
     pub fn get_trace(&mut self) -> Result<StackTrace, Error> {
         match self.get_trace_from_current_thread() {
