@@ -333,8 +333,10 @@ fn is_maybe_thread_function(version: &str) -> IsMaybeThreadFn {
         "2.4.7" => ruby_version::ruby_2_4_7::is_maybe_thread,
         "2.4.8" => ruby_version::ruby_2_4_8::is_maybe_thread,
         "2.4.9" => ruby_version::ruby_2_4_9::is_maybe_thread,
+        "2.4.10" => ruby_version::ruby_2_4_10::is_maybe_thread,
         "2.5.0" => ruby_version::ruby_2_5_0::is_maybe_thread,
         "2.5.1" => ruby_version::ruby_2_5_1::is_maybe_thread,
+        "2.5.2" => ruby_version::ruby_2_5_2::is_maybe_thread,
         "2.5.3" => ruby_version::ruby_2_5_3::is_maybe_thread,
         "2.5.4" => ruby_version::ruby_2_5_4::is_maybe_thread,
         "2.5.5" => ruby_version::ruby_2_5_5::is_maybe_thread,
@@ -350,6 +352,7 @@ fn is_maybe_thread_function(version: &str) -> IsMaybeThreadFn {
         "2.6.6" => ruby_version::ruby_2_6_6::is_maybe_thread,
         "2.7.0" => ruby_version::ruby_2_7_0::is_maybe_thread,
         "2.7.1" => ruby_version::ruby_2_7_1::is_maybe_thread,
+        "2.7.2" => ruby_version::ruby_2_7_2::is_maybe_thread,
         _ => panic!("Ruby version not supported yet: {}. Please create a GitHub issue and we'll fix it!", version),
     };
     Box::new(function)
@@ -402,8 +405,10 @@ fn get_stack_trace_function(version: &str) -> StackTraceFn {
         "2.4.7" => ruby_version::ruby_2_4_7::get_stack_trace,
         "2.4.8" => ruby_version::ruby_2_4_8::get_stack_trace,
         "2.4.9" => ruby_version::ruby_2_4_9::get_stack_trace,
+        "2.4.10" => ruby_version::ruby_2_4_10::get_stack_trace,
         "2.5.0" => ruby_version::ruby_2_5_0::get_stack_trace,
         "2.5.1" => ruby_version::ruby_2_5_1::get_stack_trace,
+        "2.5.2" => ruby_version::ruby_2_5_2::get_stack_trace,
         "2.5.3" => ruby_version::ruby_2_5_3::get_stack_trace,
         "2.5.4" => ruby_version::ruby_2_5_4::get_stack_trace,
         "2.5.5" => ruby_version::ruby_2_5_5::get_stack_trace,
@@ -419,6 +424,7 @@ fn get_stack_trace_function(version: &str) -> StackTraceFn {
         "2.6.6" => ruby_version::ruby_2_6_6::get_stack_trace,
         "2.7.0" => ruby_version::ruby_2_7_0::get_stack_trace,
         "2.7.1" => ruby_version::ruby_2_7_1::get_stack_trace,
+        "2.7.2" => ruby_version::ruby_2_7_2::get_stack_trace,
         _ => panic!("Ruby version not supported yet: {}. Please create a GitHub issue and we'll fix it!", version),
     };
     Box::new(stack_trace_function)
