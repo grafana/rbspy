@@ -61,31 +61,40 @@ lazy_static! {
     };
 }
 
+fn copy_error(err_ptr: *mut u8, err_len: i32, err_str: String) -> i32 {
+    let slice = err_str.as_bytes();
+    let l = slice.len();
+    if l as i32 > err_len {
+        return copy_error(err_ptr, err_len, "buffer is too small".to_string());
+    }
+    let target = unsafe { slice::from_raw_parts_mut(err_ptr, l as usize) };
+    target.clone_from_slice(slice);
+    -(l as i32)
+}
+
 #[no_mangle]
-pub extern "C" fn rbspy_init(pid: Pid) -> i32 {
+pub extern "C" fn rbspy_init(pid: Pid, err_ptr: *mut u8, err_len: i32) -> i32 {
     match initialize(pid) {
         Ok(getter) => {
             let mut map = HASHMAP.lock().unwrap(); // get()
             map.insert(pid, getter);
+            1
         }
         Err(err) => {
-            // TODO: return error string
-            return -1
+            copy_error(err_ptr, err_len, err.to_string())
         }
     }
-
-    return 1
 }
 
 #[no_mangle]
-pub extern "C" fn rbspy_cleanup(pid: Pid) -> i32 {
-    let mut map = HASHMAP.lock().unwrap(); // get()
+pub extern "C" fn rbspy_cleanup(pid: Pid, err_ptr: *mut u8, err_len: i32) -> i32 {
+    let mut map = HASHMAP.lock().unwrap();
     map.remove(&pid);
     1
 }
 
 #[no_mangle]
-pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32) -> i32 {
+pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32, err_ptr: *mut u8, err_len: i32) -> i32 {
     let mut map = HASHMAP.lock().unwrap(); // get()
     match map.get_mut(&pid) {
         Some(getter) => {
@@ -101,7 +110,7 @@ pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32) -> i32 {
                 let l = joined_slice.len();
 
                 if len < (l as i32) {
-                    res = -1;
+                    res = copy_error(err_ptr, err_len, "buffer is too small".to_string())
                 } else {
                     let slice = unsafe { slice::from_raw_parts_mut(ptr, l as usize) };
                     slice.clone_from_slice(joined_slice);
@@ -109,11 +118,11 @@ pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32) -> i32 {
                 }
               }
               Err(err) => {
-                  res = -3
+                  res = copy_error(err_ptr, err_len, err.to_string())
               }
             }
             res
         }
-        None => -2
+        None => copy_error(err_ptr, err_len, "could not find spy for this pid".to_string())
     }
 }
