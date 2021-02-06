@@ -5,8 +5,6 @@ extern crate byteorder;
 extern crate chrono;
 extern crate clap;
 extern crate elf;
-extern crate env_logger;
-extern crate inferno;
 #[macro_use]
 extern crate failure;
 #[macro_use]
@@ -15,7 +13,6 @@ extern crate libc;
 #[cfg(target_os = "macos")]
 extern crate libproc;
 #[cfg(unix)]
-extern crate nix;
 extern crate proc_maps;
 #[macro_use]
 extern crate log;
@@ -25,12 +22,6 @@ extern crate rbspy_testdata;
 extern crate remoteprocess;
 
 extern crate rbspy_ruby_structs as bindings;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate tempdir;
-extern crate term_size;
 #[cfg(windows)]
 extern crate winapi;
 

@@ -9,14 +9,14 @@ use failure::Context;
 
 pub use remoteprocess::{Error, Process, Pid, ProcessMemory};
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub(crate) struct Header {
     pub sample_rate: Option<u32>,
     pub rbspy_version: Option<String>,
     pub start_time: Option<SystemTime>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct StackFrame {
     pub name: String,
     pub relative_path: String,
@@ -24,7 +24,7 @@ pub struct StackFrame {
     pub lineno: u32,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct StackTrace {
     pub trace: Vec<StackFrame>,
     pub pid: Option<Pid>,
