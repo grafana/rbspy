@@ -54,7 +54,9 @@ use libc::pid_t;
 
 #[cfg(target_os = "macos")]
 extern crate libproc;
+#[cfg(target_os = "macos")]
 use libproc::libproc::proc_pid::pidinfo;
+#[cfg(target_os = "macos")]
 use libproc::libproc::task_info::TaskInfo;
 
 fn get_cpu(maybe_pid: Option<pid_t>) -> Result<bool, Error> {
