@@ -32,9 +32,6 @@ use crate::core::types::Pid;
 use crate::core::initialize::initialize;
 use crate::core::initialize::StackTraceGetter;
 
-use libc::*;
-use std::panic::*;
-use std::ptr::*;
 
 use std::slice;
 
@@ -78,7 +75,7 @@ pub extern "C" fn rbspy_init(pid: Pid, err_ptr: *mut u8, err_len: i32) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn rbspy_cleanup(pid: Pid, err_ptr: *mut u8, err_len: i32) -> i32 {
+pub extern "C" fn rbspy_cleanup(pid: Pid, _err_ptr: *mut u8, _err_len: i32) -> i32 {
     let mut map = HASHMAP.lock().unwrap();
     map.remove(&pid);
     1

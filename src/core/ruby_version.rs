@@ -519,7 +519,7 @@ macro_rules! get_lineno_2_6_0(
     () => (
         fn get_lineno<T>(
             iseq_struct: &rb_iseq_constant_body,
-            cfp: &rb_control_frame_t,
+            _cfp: &rb_control_frame_t,
             source: &T,
             ) -> Result<u32, MemoryCopyError> where T: ProcessMemory {
             //let pos = get_pos(iseq_struct, cfp)?;

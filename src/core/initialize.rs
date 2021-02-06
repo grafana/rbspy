@@ -51,11 +51,11 @@ unsafe impl Send for StackTraceGetter {}
 
 use libc::pid_t;
 
-extern crate libproc;
 
+#[cfg(target_os = "macos")]
+extern crate libproc;
 use libproc::libproc::proc_pid::pidinfo;
 use libproc::libproc::task_info::TaskInfo;
-
 
 fn get_cpu(maybe_pid: Option<pid_t>) -> Result<bool, Error> {
     match maybe_pid {
@@ -78,7 +78,7 @@ fn on_cpu(pid: pid_t) -> Result<bool, Error>{
 
     match pidinfo::<TaskInfo>(pid, 0) {
         Ok(info) => Ok(info.pti_numrunning > 0),
-        Err(err) => Ok(true),
+        Err(_err) => Ok(true),
     }
 //
     // Ok(true)
