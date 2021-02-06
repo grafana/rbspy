@@ -100,7 +100,9 @@ pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32, err_ptr: *mut
                 let joined_slice = joined.as_bytes();
                 let l = joined_slice.len();
 
-                if len < (l as i32) {
+                if trace.on_cpu != Some(true) {
+                    res = copy_error(err_ptr, err_len, "not on cpu".to_string())
+                } else if len < (l as i32) {
                     res = copy_error(err_ptr, err_len, "buffer is too small".to_string())
                 } else {
                     let slice = unsafe { slice::from_raw_parts_mut(ptr, l as usize) };

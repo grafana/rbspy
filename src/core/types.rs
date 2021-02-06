@@ -30,6 +30,7 @@ pub struct StackTrace {
     pub pid: Option<Pid>,
     pub thread_id: Option<usize>,
     pub time: Option<SystemTime>,
+    pub on_cpu: Option<bool>,
 }
 
 #[derive(Fail, Debug)]

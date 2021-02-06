@@ -48,7 +48,45 @@ pub struct StackTraceGetter {
 unsafe impl Send for StackTraceGetter {}
 // unsafe impl Sync for StackTraceGetter {}
 
+
+use libc::pid_t;
+
+extern crate libproc;
+
+use libproc::libproc::proc_pid::pidinfo;
+use libproc::libproc::task_info::TaskInfo;
+
+
+fn get_cpu(maybe_pid: Option<pid_t>) -> Result<bool, Error> {
+    match maybe_pid {
+        None => Err(format_err!("no pid given")),
+        Some(pid) => on_cpu(pid),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn on_cpu(pid: pid_t) -> Result<bool, Error> {
+    use std::fs::File;
+    use std::io::Read;
+    let mut contents = String::new();
+    File::open(format!("/proc/{}/status", pid))?.read_to_string(&mut contents)?;
+    Ok(contents.contains("State:\tR"))
+}
+
+#[cfg(target_os = "macos")]
+fn on_cpu(pid: pid_t) -> Result<bool, Error>{
+
+    match pidinfo::<TaskInfo>(pid, 0) {
+        Ok(info) => Ok(info.pti_numrunning > 0),
+        Err(err) => Ok(true),
+    }
+//
+    // Ok(true)
+}
+
 impl StackTraceGetter {
+
+
     pub fn get_trace(&mut self) -> Result<StackTrace, Error> {
         match self.get_trace_from_current_thread() {
             Ok(mut trace) => return {
@@ -57,6 +95,7 @@ impl StackTraceGetter {
                  * trait does not expose pid.
                  */
                 trace.pid = Some(self.process.pid);
+                trace.on_cpu = on_cpu(self.process.pid).ok();
                 Ok(trace)
             },
             Err(MemoryCopyError::InvalidAddressError(addr))

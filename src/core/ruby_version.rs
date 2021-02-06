@@ -160,7 +160,8 @@ macro_rules! get_stack_trace(
                     pid: None,
                     trace: vec!(StackFrame::unknown_c_function()),
                     thread_id: Some(get_thread_id(&thread, source)?),
-                    time: Some(SystemTime::now())
+                    time: Some(SystemTime::now()),
+                    on_cpu: None,
                 });
             }
             let mut trace = Vec::new();
@@ -202,7 +203,8 @@ macro_rules! get_stack_trace(
                     }
                 }
             }
-            Ok(StackTrace{trace, pid: None, thread_id: Some(get_thread_id(&thread, source)?), time: Some(SystemTime::now())})
+
+            Ok(StackTrace{trace, pid: None, thread_id: Some(get_thread_id(&thread, source)?), time: Some(SystemTime::now()), on_cpu: None})
         }
 
 use proc_maps::{maps_contain_addr, MapRange};
