@@ -59,33 +59,6 @@ use libproc::libproc::proc_pid::pidinfo;
 #[cfg(target_os = "macos")]
 use libproc::libproc::task_info::TaskInfo;
 
-fn get_cpu(maybe_pid: Option<pid_t>) -> Result<bool, Error> {
-    match maybe_pid {
-        None => Err(format_err!("no pid given")),
-        Some(pid) => on_cpu(pid),
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn on_cpu(pid: pid_t) -> Result<bool, Error> {
-    use std::fs::File;
-    use std::io::Read;
-    let mut contents = String::new();
-    File::open(format!("/proc/{}/status", pid))?.read_to_string(&mut contents)?;
-    Ok(contents.contains("State:\tR"))
-}
-
-#[cfg(target_os = "macos")]
-fn on_cpu(pid: pid_t) -> Result<bool, Error>{
-
-    match pidinfo::<TaskInfo>(pid, 0) {
-        Ok(info) => Ok(info.pti_numrunning > 0),
-        Err(_err) => Ok(true),
-    }
-//
-    // Ok(true)
-}
-
 impl StackTraceGetter {
 
 
@@ -97,7 +70,7 @@ impl StackTraceGetter {
                  * trait does not expose pid.
                  */
                 trace.pid = Some(self.process.pid);
-                trace.on_cpu = on_cpu(self.process.pid).ok();
+                trace.on_cpu = self.on_cpu().ok();
                 Ok(trace)
             },
             Err(MemoryCopyError::InvalidAddressError(addr))
@@ -126,6 +99,26 @@ impl StackTraceGetter {
         self.reinit_count += 1;
 
         Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn on_cpu(&self) -> Result<bool, Error> {
+        for thread in self.process.threads()?.iter() {
+            let active = thread.active()?;
+            if active {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn on_cpu(&self) -> Result<bool, Error>{
+        let pid = self.process.pid;
+        match pidinfo::<TaskInfo>(pid, 0) {
+            Ok(info) => Ok(info.pti_numrunning > 0),
+            Err(_err) => Ok(true),
+        }
     }
 }
 
