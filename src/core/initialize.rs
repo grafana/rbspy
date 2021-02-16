@@ -70,7 +70,7 @@ impl StackTraceGetter {
                  * trait does not expose pid.
                  */
                 trace.pid = Some(self.process.pid);
-                trace.on_cpu = on_cpu(self.process).ok();
+                trace.on_cpu = self.on_cpu().ok();
                 Ok(trace)
             },
             Err(MemoryCopyError::InvalidAddressError(addr))
@@ -102,7 +102,7 @@ impl StackTraceGetter {
     }
 
     #[cfg(target_os = "linux")]
-    fn on_cpu(process: remoteprocess::Process) -> Result<bool, Error> {
+    fn on_cpu(&self) -> Result<bool, Error> {
         for thread in self.process.threads()?.iter() {
             let active = thread.active()?;
             if active {
@@ -113,8 +113,8 @@ impl StackTraceGetter {
     }
 
     #[cfg(target_os = "macos")]
-    fn on_cpu(process: remoteprocess::Process) -> Result<bool, Error>{
-        let pid = process.pid;
+    fn on_cpu(&self) -> Result<bool, Error>{
+        let pid = self.process.pid;
         match pidinfo::<TaskInfo>(pid, 0) {
             Ok(info) => Ok(info.pti_numrunning > 0),
             Err(_err) => Ok(true),
