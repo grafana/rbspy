@@ -106,7 +106,7 @@ impl StackTraceGetter {
         for thread in self.process.threads()?.iter() {
             let active = thread.active()?;
             if active {
-                Ok(true)
+                return Ok(true);
             }
         }
         Ok(false)
