@@ -71,7 +71,7 @@ impl StackFrame {
 
 impl fmt::Display for StackFrame {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} - {}:{}", self.name, self.path(), self.lineno)
+        write!(f, "{}:{} - {}", self.relative_path, self.lineno, self.name)
     }
 }
 
