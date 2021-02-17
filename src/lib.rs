@@ -32,7 +32,7 @@ use crate::core::types::Pid;
 use crate::core::initialize::initialize;
 use crate::core::initialize::StackTraceGetter;
 
-
+use std::env;
 use std::slice;
 
 #[macro_use]
@@ -53,7 +53,7 @@ fn copy_error(err_ptr: *mut u8, err_len: i32, err_str: String) -> i32 {
     let slice = err_str.as_bytes();
     let l = slice.len();
     if l as i32 > err_len {
-        return copy_error(err_ptr, err_len, "buffer is too small".to_string());
+        return copy_error(err_ptr, err_len, "error buffer is too small".to_string());
     }
     let target = unsafe { slice::from_raw_parts_mut(err_ptr, l as usize) };
     target.clone_from_slice(slice);
@@ -84,6 +84,10 @@ pub extern "C" fn rbspy_cleanup(pid: Pid, _err_ptr: *mut u8, _err_len: i32) -> i
 #[no_mangle]
 pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32, err_ptr: *mut u8, err_len: i32) -> i32 {
     let mut map = HASHMAP.lock().unwrap(); // get()
+
+    let cwd = env::current_dir().unwrap();
+    let cwd = cwd.to_str().unwrap_or("");
+
     match map.get_mut(&pid) {
         Some(getter) => {
             let mut res = 0;
@@ -91,7 +95,39 @@ pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32, err_ptr: *mut
               Ok(trace) => {
                 let mut string_list = vec![];
                 for x in trace.iter().rev() {
-                    string_list.push(x.to_string());
+                    let mut s = x.to_string();
+
+                    // TODO: there must be a way to write this cleanly
+                    match s.find(cwd) {
+                        Some(i) => {
+                            s = s[(i+cwd.len()+1)..].to_string();
+                        }
+                        None => {
+                            match s.find("/gems/") {
+                                Some(i) => {
+                                    s = s[(i+1)..].to_string();
+                                }
+                                None => {
+                                    match s.find("/ruby/") {
+                                        Some(i) => {
+                                            s = s[(i+6)..].to_string();
+                                            match s.find("/") {
+                                                Some(i) => {
+                                                    s = s[(i+1)..].to_string();
+                                                }
+                                                None => {
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    string_list.push(s);
                 }
                 let joined = string_list.join(";");
                 let joined_slice = joined.as_bytes();
