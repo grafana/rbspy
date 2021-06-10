@@ -157,7 +157,7 @@ impl StackTraceGetter {
     }
 
     #[cfg(target_os = "linux")]
-    fn on_cpu(&self) -> Result<bool, Error> {
+    fn on_cpu(&self) -> Result<bool> {
         for thread in self.process.threads()?.iter() {
             let active = thread.active()?;
             if active {
@@ -168,7 +168,7 @@ impl StackTraceGetter {
     }
 
     #[cfg(target_os = "macos")]
-    fn on_cpu(&self) -> Result<bool, Error>{
+    fn on_cpu(&self) -> Result<bool> {
         let pid = self.process.pid;
         match pidinfo::<TaskInfo>(pid, 0) {
             Ok(info) => Ok(info.pti_numrunning > 0),
