@@ -52,6 +52,20 @@ pub struct StackTraceGetter {
     lock_process: bool,
 }
 
+unsafe impl Send for StackTraceGetter {}
+// unsafe impl Sync for StackTraceGetter {}
+
+
+use libc::pid_t;
+
+
+#[cfg(target_os = "macos")]
+extern crate libproc;
+#[cfg(target_os = "macos")]
+use libproc::libproc::proc_pid::pidinfo;
+#[cfg(target_os = "macos")]
+use libproc::libproc::task_info::TaskInfo;
+
 impl StackTraceGetter {
     pub fn get_trace(&mut self) -> Result<StackTrace> {
         match self.get_trace_from_current_thread() {
@@ -62,6 +76,7 @@ impl StackTraceGetter {
                      * trait does not expose pid.
                      */
                     trace.pid = Some(self.process.pid);
+                    trace.on_cpu = self.on_cpu().ok();
                     Ok(trace)
                 };
             }
@@ -139,6 +154,26 @@ impl StackTraceGetter {
         self.reinit_count += 1;
 
         Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn on_cpu(&self) -> Result<bool, Error> {
+        for thread in self.process.threads()?.iter() {
+            let active = thread.active()?;
+            if active {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn on_cpu(&self) -> Result<bool, Error>{
+        let pid = self.process.pid;
+        match pidinfo::<TaskInfo>(pid, 0) {
+            Ok(info) => Ok(info.pti_numrunning > 0),
+            Err(_err) => Ok(true),
+        }
     }
 }
 

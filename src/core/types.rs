@@ -9,14 +9,14 @@ use thiserror::Error;
 
 pub use remoteprocess::{Pid, Process, ProcessMemory};
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub(crate) struct Header {
     pub sample_rate: Option<u32>,
     pub rbspy_version: Option<String>,
     pub start_time: Option<SystemTime>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct StackFrame {
     pub name: String,
     pub relative_path: String,
@@ -24,12 +24,13 @@ pub struct StackFrame {
     pub lineno: u32,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct StackTrace {
     pub trace: Vec<StackFrame>,
     pub pid: Option<Pid>,
     pub thread_id: Option<usize>,
     pub time: Option<SystemTime>,
+    pub on_cpu: Option<bool>,
 }
 
 #[derive(Error, Debug)]
@@ -74,7 +75,7 @@ impl StackFrame {
 
 impl fmt::Display for StackFrame {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} - {}:{}", self.name, self.path(), self.lineno)
+        write!(f, "{}:{} - {}", self.path(), self.lineno, self.name)
     }
 }
 
