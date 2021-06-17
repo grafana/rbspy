@@ -61,8 +61,8 @@ fn copy_error(err_ptr: *mut u8, err_len: i32, err_str: String) -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn rbspy_init(pid: Pid, err_ptr: *mut u8, err_len: i32) -> i32 {
-    match initialize(pid) {
+pub extern "C" fn rbspy_init(pid: Pid, blocking: i32, err_ptr: *mut u8, err_len: i32) -> i32 {
+    match initialize(pid, blocking != 0) {
         Ok(getter) => {
             let mut map = HASHMAP.lock().unwrap(); // get()
             map.insert(pid, getter);
