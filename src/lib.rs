@@ -92,60 +92,68 @@ pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32, err_ptr: *mut
         Some(getter) => {
             let mut res = 0;
             match getter.get_trace() {
-              Ok(trace) => {
-                let mut string_list = vec![];
-                for x in trace.iter().rev() {
-                    let mut s = x.to_string();
+                Ok(trace2) => {
+                    match trace2 {
+                        Some(trace) => {
+                            // if trace.on_cpu != Some(true) {
+                            //     res = copy_error(err_ptr, err_len, "not on cpu".to_string())
+                            // } else {
+                            let mut string_list = vec![];
+                            for x in trace.iter().rev() {
+                                let mut s = x.to_string();
 
-                    // TODO: there must be a way to write this cleanly
-                    match s.find(cwd) {
-                        Some(i) => {
-                            s = s[(i+cwd.len()+1)..].to_string();
-                        }
-                        None => {
-                            match s.find("/gems/") {
-                                Some(i) => {
-                                    s = s[(i+1)..].to_string();
-                                }
-                                None => {
-                                    match s.find("/ruby/") {
-                                        Some(i) => {
-                                            s = s[(i+6)..].to_string();
-                                            match s.find("/") {
-                                                Some(i) => {
-                                                    s = s[(i+1)..].to_string();
-                                                }
-                                                None => {
+                                // TODO: there must be a way to write this cleanly
+                                match s.find(cwd) {
+                                    Some(i) => {
+                                        s = s[(i+cwd.len()+1)..].to_string();
+                                    }
+                                    None => {
+                                        match s.find("/gems/") {
+                                            Some(i) => {
+                                                s = s[(i+1)..].to_string();
+                                            }
+                                            None => {
+                                                match s.find("/ruby/") {
+                                                    Some(i) => {
+                                                        s = s[(i+6)..].to_string();
+                                                        match s.find("/") {
+                                                            Some(i) => {
+                                                                s = s[(i+1)..].to_string();
+                                                            }
+                                                            None => {
+                                                            }
+                                                        }
+                                                    }
+                                                    None => {
+                                                    }
                                                 }
                                             }
                                         }
-                                        None => {
-                                        }
                                     }
                                 }
+
+                                string_list.push(s);
+                            }
+                            let joined = string_list.join(";");
+                            let joined_slice = joined.as_bytes();
+                            let l = joined_slice.len();
+
+                            if len < (l as i32) {
+                                res = copy_error(err_ptr, err_len, "buffer is too small".to_string())
+                            } else {
+                                let slice = unsafe { slice::from_raw_parts_mut(ptr, l as usize) };
+                                slice.clone_from_slice(joined_slice);
+                                res = l as i32
                             }
                         }
+                        None => {
+                            res = copy_error(err_ptr, err_len, "failure".to_string())
+                        }
                     }
-
-                    string_list.push(s);
                 }
-                let joined = string_list.join(";");
-                let joined_slice = joined.as_bytes();
-                let l = joined_slice.len();
-
-                if trace.on_cpu != Some(true) {
-                    res = copy_error(err_ptr, err_len, "not on cpu".to_string())
-                } else if len < (l as i32) {
-                    res = copy_error(err_ptr, err_len, "buffer is too small".to_string())
-                } else {
-                    let slice = unsafe { slice::from_raw_parts_mut(ptr, l as usize) };
-                    slice.clone_from_slice(joined_slice);
-                    res = l as i32
+                Err(err) => {
+                    res = copy_error(err_ptr, err_len, err.to_string())
                 }
-              }
-              Err(err) => {
-                  res = copy_error(err_ptr, err_len, err.to_string())
-              }
             }
             res
         }

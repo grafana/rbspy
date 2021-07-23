@@ -67,19 +67,20 @@ use libproc::libproc::proc_pid::pidinfo;
 use libproc::libproc::task_info::TaskInfo;
 
 impl StackTraceGetter {
-    pub fn get_trace(&mut self) -> Result<StackTrace> {
+    pub fn get_trace(&mut self) -> Result<Option<StackTrace>> {
         match self.get_trace_from_current_thread() {
-            Ok(mut trace) => {
+            Ok(Some(mut trace)) => {
                 return {
                     /* This is a spike to enrich the trace with the pid.
                      * This is needed, because remoteprocess' ProcessMemory
                      * trait does not expose pid.
                      */
                     trace.pid = Some(self.process.pid);
-                    trace.on_cpu = self.on_cpu().ok();
-                    Ok(trace)
+                    // trace.on_cpu = self.on_cpu().ok();
+                    Ok(Some(trace))
                 };
             }
+            Ok(None) => return Ok(None),
             Err(MemoryCopyError::InvalidAddressError(addr))
                 if addr == self.current_thread_addr_location => {}
             Err(e) => return Err(e.into()),
@@ -89,7 +90,7 @@ impl StackTraceGetter {
         Ok(self.get_trace_from_current_thread()?)
     }
 
-    fn get_trace_from_current_thread(&self) -> Result<StackTrace, MemoryCopyError> {
+    fn get_trace_from_current_thread(&self) -> Result<Option<StackTrace>, MemoryCopyError> {
         let stack_trace_function = &self.stack_trace_function;
 
         let _lock;
@@ -155,26 +156,6 @@ impl StackTraceGetter {
 
         Ok(())
     }
-
-    #[cfg(target_os = "linux")]
-    fn on_cpu(&self) -> Result<bool> {
-        for thread in self.process.threads()?.iter() {
-            let active = thread.active()?;
-            if active {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    #[cfg(target_os = "macos")]
-    fn on_cpu(&self) -> Result<bool> {
-        let pid = self.process.pid;
-        match pidinfo::<TaskInfo>(pid, 0) {
-            Ok(info) => Ok(info.pti_numrunning > 0),
-            Err(_err) => Ok(true),
-        }
-    }
 }
 
 pub type IsMaybeThreadFn = Box<dyn Fn(usize, usize, &Process, &[MapRange]) -> bool>;
@@ -182,7 +163,7 @@ pub type IsMaybeThreadFn = Box<dyn Fn(usize, usize, &Process, &[MapRange]) -> bo
 // Everything below here is private
 
 type StackTraceFn =
-    Box<dyn Fn(usize, usize, Option<usize>, &Process, Pid) -> Result<StackTrace, MemoryCopyError>>;
+    Box<dyn Fn(usize, usize, Option<usize>, &Process, Pid) -> Result<Option<StackTrace>, MemoryCopyError>>;
 
 fn get_process_ruby_state(
     pid: Pid,
