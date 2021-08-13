@@ -5,10 +5,6 @@ extern crate byteorder;
 extern crate chrono;
 extern crate clap;
 extern crate elf;
-#[macro_use]
-extern crate failure;
-#[macro_use]
-extern crate failure_derive;
 extern crate libc;
 #[cfg(target_os = "macos")]
 extern crate libproc;

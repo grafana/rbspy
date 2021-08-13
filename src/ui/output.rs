@@ -1,7 +1,7 @@
 #[cfg(test)]
 extern crate tempdir;
 
-use std::fs::File;
+use std::io::Write;
 
 use crate::core::types::{StackFrame, StackTrace};
 use crate::ui::{callgrind, flamegraph, speedscope, summary};
@@ -10,20 +10,49 @@ use anyhow::Result;
 
 pub trait Outputter {
     fn record(&mut self, stack: &StackTrace) -> Result<()>;
-    fn complete(&mut self, file: File) -> Result<()>;
+    fn complete(&mut self, write: &mut dyn Write) -> Result<()>;
 }
 
 // Uses Inferno to visualize stack traces
-pub struct Flamegraph(pub flamegraph::Stats);
+pub struct Flamegraph {
+    stats: flamegraph::Stats,
+    min_width: f64,
+}
 
 impl Outputter for Flamegraph {
+    fn record(&mut self, stack: &StackTrace) -> Result<()> {
+        self.stats.record(&stack.trace)?;
+        Ok(())
+    }
+
+    fn complete(&mut self, write: &mut dyn Write) -> Result<()> {
+        self.stats.write_flamegraph(write, self.min_width)?;
+        Ok(())
+    }
+}
+
+impl Flamegraph {
+    pub fn new(min_width: f64) -> Flamegraph {
+        Flamegraph {
+            min_width: min_width,
+            stats: Default::default(),
+        }
+    }
+}
+
+// Collapsed stacks are the intermediate flamegraph format,
+// useful for making additional processing or using other flamegraph generators.
+#[derive(Default)]
+pub struct Collapsed(pub flamegraph::Stats);
+
+impl Outputter for Collapsed {
     fn record(&mut self, stack: &StackTrace) -> Result<()> {
         self.0.record(&stack.trace)?;
         Ok(())
     }
 
-    fn complete(&mut self, file: File) -> Result<()> {
-        self.0.write(file)?;
+    fn complete(&mut self, mut write: &mut dyn Write) -> Result<()> {
+        self.0.write_collapsed(&mut write)?;
         Ok(())
     }
 }
@@ -36,9 +65,9 @@ impl Outputter for Callgrind {
         Ok(())
     }
 
-    fn complete(&mut self, mut file: File) -> Result<()> {
+    fn complete(&mut self, mut write: &mut dyn Write) -> Result<()> {
         self.0.finish();
-        self.0.write(&mut file)?;
+        self.0.write(&mut write)?;
         Ok(())
     }
 }
@@ -51,8 +80,8 @@ impl Outputter for Summary {
         Ok(())
     }
 
-    fn complete(&mut self, mut file: File) -> Result<()> {
-        self.0.write(&mut file)?;
+    fn complete(&mut self, mut write: &mut dyn Write) -> Result<()> {
+        self.0.write(&mut write)?;
         Ok(())
     }
 }
@@ -65,8 +94,8 @@ impl Outputter for SummaryLine {
         Ok(())
     }
 
-    fn complete(&mut self, mut file: File) -> Result<()> {
-        self.0.write(&mut file)?;
+    fn complete(&mut self, mut write: &mut dyn Write) -> Result<()> {
+        self.0.write(&mut write)?;
         Ok(())
     }
 }
@@ -79,8 +108,8 @@ impl Outputter for Speedscope {
         Ok(())
     }
 
-    fn complete(&mut self, file: File) -> Result<()> {
-        self.0.write(file)?;
+    fn complete(&mut self, write: &mut dyn Write) -> Result<()> {
+        self.0.write(write)?;
         Ok(())
     }
 }
