@@ -143,7 +143,7 @@ pub extern "C" fn rbspy_snapshot(pid: Pid, ptr: *mut u8, len: i32, err_ptr: *mut
                             }
                         }
                         None => {
-                            res = copy_error(err_ptr, err_len, "failure".to_string())
+                            res = 0
                         }
                     }
                 }
