@@ -1,6 +1,6 @@
 [package]
 name = "rbspy"
-version = "0.8.1"
+version = "0.10.0"
 authors = ["Adam Jensen <acjensen@gmail.com>", "Julia Evans <julia@jvns.ca>"]
 description = "Sampling CPU profiler for Ruby"
 keywords = ["ruby", "profiler", "MRI"]
@@ -9,7 +9,8 @@ repository = "https://github.com/rbspy/rbspy"
 readme = "README.md"
 documentation = "https://github.com/rbspy/rbspy"
 homepage = "https://rbspy.github.io/"
-edition = "2018"
+edition = "2021"
+exclude = ["/.github/", "/scripts/", "/ci/", "/xtask/"]
 
 [lib]
 crate-type = ["staticlib", "dylib", "rlib"]
@@ -17,6 +18,7 @@ crate-type = ["staticlib", "dylib", "rlib"]
 [workspace]
 members = [
     "ruby-structs",
+    "xtask",
 ]
 
 [dependencies]
@@ -31,9 +33,10 @@ flate2 = "1.0.20"
 lazy_static = "1.2.0"
 libc = "0.2.34"
 log = "0.4.6"
-proc-maps = "0.1.8"
+proc-maps = "0.2.0"
+prost = "0.9"
 rand = "0.8.3"
-rbspy-ruby-structs = { path = "ruby-structs", version="0.8.0" }
+rbspy-ruby-structs = { path = "ruby-structs", version="0.10.0" }
 remoteprocess = "0.4.5"
 serde = "1"
 serde_derive = "1"
@@ -43,17 +46,17 @@ tempdir = "0.3"
 thiserror = "1.0.24"
 
 [target.'cfg(unix)'.dependencies]
-nix = "0.22.0"
+nix = "0.23.0"
 
 [target.'cfg(target_os="macos")'.dependencies]
-libproc = "0.9.1"
+libproc = "0.10.0"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["timeapi", "wow64apiset"] }
 
 [dev-dependencies]
 byteorder = "1.4.3"
-rbspy-testdata = { git = "https://github.com/rbspy/rbspy-testdata", branch = "master" }
+rbspy-testdata = "0.1.5"
 tempdir = "0.3.4"
 
 [build-dependencies]

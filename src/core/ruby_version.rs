@@ -14,10 +14,11 @@ macro_rules! ruby_version_v_1_9_1(
             use std;
             use anyhow::{Context, format_err, Result};
             use bindings::$ruby_version::*;
-            use crate::core::types::ProcessMemory;
+            use crate::core::process::ProcessMemory;
 
             get_stack_trace!(rb_thread_struct);
             get_execution_context_from_thread!(rb_thread_struct);
+            rstring_as_array_1_9_1!();
             get_ruby_string!();
             get_cfps!();
             get_pos!(rb_iseq_struct);
@@ -38,10 +39,11 @@ macro_rules! ruby_version_v_1_9_2_to_3(
             use std;
             use anyhow::{Context, format_err, Result};
             use bindings::$ruby_version::*;
-            use crate::core::types::ProcessMemory;
+            use crate::core::process::ProcessMemory;
 
             get_stack_trace!(rb_thread_struct);
             get_execution_context_from_thread!(rb_thread_struct);
+            rstring_as_array_1_9_1!();
             get_ruby_string!();
             get_cfps!();
             get_pos!(rb_iseq_struct);
@@ -61,7 +63,7 @@ macro_rules! ruby_version_v_2_0_to_2_2(
            use std;
            use anyhow::{Context, format_err, Result};
            use bindings::$ruby_version::*;
-           use crate::core::types::ProcessMemory;
+           use crate::core::process::ProcessMemory;
 
             // These 4 functions are the
             // core of how the program works. They're essentially a straight port of
@@ -77,6 +79,7 @@ macro_rules! ruby_version_v_2_0_to_2_2(
             // on how it's stored
             get_stack_trace!(rb_thread_struct);
             get_execution_context_from_thread!(rb_thread_struct);
+            rstring_as_array_1_9_1!();
             get_ruby_string!();
             get_cfps!();
             get_pos!(rb_iseq_struct);
@@ -96,10 +99,11 @@ macro_rules! ruby_version_v_2_3_to_2_4(
            use std;
            use anyhow::{Context, format_err, Result};
            use bindings::$ruby_version::*;
-           use crate::core::types::ProcessMemory;
+           use crate::core::process::ProcessMemory;
 
             get_stack_trace!(rb_thread_struct);
             get_execution_context_from_thread!(rb_thread_struct);
+            rstring_as_array_1_9_1!();
             get_ruby_string!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
@@ -119,10 +123,11 @@ macro_rules! ruby_version_v2_5_x(
            use std;
            use anyhow::{Context, format_err, Result};
            use bindings::$ruby_version::*;
-           use crate::core::types::ProcessMemory;
+           use crate::core::process::ProcessMemory;
 
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_thread!(rb_execution_context_struct);
+            rstring_as_array_1_9_1!();
             get_ruby_string!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
@@ -146,17 +151,18 @@ macro_rules! ruby_version_v2_6_x(
            use std;
            use anyhow::{Context, format_err, Result};
            use bindings::$ruby_version::*;
-           use crate::core::types::ProcessMemory;
+           use crate::core::process::ProcessMemory;
 
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_thread!(rb_execution_context_struct);
+            rstring_as_array_1_9_1!();
             get_ruby_string!();
+            get_ruby_string_array_2_5_0!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
             get_lineno_2_6_0!();
             get_stack_frame_2_5_0!();
             stack_field_2_5_0!();
-            get_ruby_string_array_2_5_0!();
             get_thread_status_2_6_0!();
             get_thread_id_2_5_0!();
             #[cfg(any(target_os = "freebsd", target_os = "macos", target_os = "windows"))]
@@ -173,17 +179,18 @@ macro_rules! ruby_version_v2_7_x(
             use std;
             use anyhow::{Context, format_err, Result};
             use bindings::$ruby_version::*;
-            use crate::core::types::ProcessMemory;
+            use crate::core::process::ProcessMemory;
 
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_thread!(rb_execution_context_struct);
+            rstring_as_array_1_9_1!();
             get_ruby_string!();
+            get_ruby_string_array_2_5_0!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
             get_lineno_2_6_0!();
             get_stack_frame_2_5_0!();
             stack_field_2_5_0!();
-            get_ruby_string_array_2_5_0!();
             get_thread_status_2_6_0!();
             get_thread_id_2_5_0!();
             get_cfunc_name!();
@@ -197,18 +204,45 @@ macro_rules! ruby_version_v3_0_x(
             use std;
             use anyhow::{Context, format_err, Result};
             use bindings::$ruby_version::*;
-            use crate::core::types::ProcessMemory;
+            use crate::core::process::ProcessMemory;
 
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_vm!();
+            rstring_as_array_1_9_1!();
             get_ruby_string!();
+            get_ruby_string_array_2_5_0!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
             get_lineno_2_6_0!();
             get_stack_frame_2_5_0!();
             stack_field_2_5_0!();
+            get_thread_id_2_5_0!();
+            get_cfunc_name!();
+
+            #[allow(non_upper_case_globals)]
+            const ruby_fl_type_RUBY_FL_USHIFT: ruby_fl_type = ruby_fl_ushift_RUBY_FL_USHIFT as i32;
+        }
+    )
+);
+
+macro_rules! ruby_version_v3_1_x(
+    ($ruby_version:ident) => (
+        pub mod $ruby_version {
+            use std;
+            use anyhow::{Context, format_err, Result};
+            use bindings::$ruby_version::*;
+            use crate::core::process::ProcessMemory;
+
+            get_stack_trace!(rb_execution_context_struct);
+            get_execution_context_from_vm!();
+            rstring_as_array_3_1_0!();
+            get_ruby_string!();
             get_ruby_string_array_2_5_0!();
-            get_thread_status_2_6_0!();
+            get_cfps!();
+            get_pos!(rb_iseq_constant_body);
+            get_lineno_2_6_0!();
+            get_stack_frame_2_5_0!();
+            stack_field_2_5_0!();
             get_thread_id_2_5_0!();
             get_cfunc_name!();
 
@@ -276,8 +310,8 @@ macro_rules! get_execution_context_from_vm(
 
 macro_rules! get_stack_trace(
     ($thread_type:ident) => (
-        use crate::core::types::*;
-        use crate::core::types::StackFrame;
+        use crate::core::process::Pid;
+        use crate::core::types::{StackFrame, StackTrace, MemoryCopyError};
 
         pub fn get_stack_trace<T: ProcessMemory>(
             ruby_current_thread_address_location: usize,
@@ -504,6 +538,22 @@ macro_rules! get_ruby_string_array_2_5_0(
     )
 );
 
+macro_rules! rstring_as_array_1_9_1(
+    () => (
+        unsafe fn rstring_as_array(rstring: RString) -> [::std::os::raw::c_char; 24usize] {
+            rstring.as_.ary
+        }
+    )
+);
+
+macro_rules! rstring_as_array_3_1_0(
+    () => (
+        unsafe fn rstring_as_array(rstring: RString) -> [::std::os::raw::c_char; 24usize] {
+            rstring.as_.embed.ary
+        }
+    )
+);
+
 macro_rules! get_ruby_string(
     () => (
         use std::ffi::CStr;
@@ -518,7 +568,7 @@ macro_rules! get_ruby_string(
                 let basic = rstring.basic;
                 let is_array = basic.flags & 1 << 13 == 0;
                 if is_array {
-                    unsafe { CStr::from_ptr(rstring.as_.ary.as_ref().as_ptr() as *const libc::c_char) }
+                    unsafe { CStr::from_ptr(rstring_as_array(rstring).as_ref().as_ptr() as *const libc::c_char) }
                     .to_bytes()
                     .to_vec()
                 } else {
@@ -863,7 +913,7 @@ macro_rules! get_cfunc_name(
                 imemo_type_imemo_ment => Ok(&imemo as *const rb_method_entry_struct),
                 imemo_type_imemo_svar => {
                     let svar: vm_svar = source.copy_struct(raw_imemo).context(raw_imemo)?;
-                    check_method_entry(svar.cref_or_me, source)
+                    check_method_entry(svar.cref_or_me as usize, source)
                 },
                 _ => Ok(raw_imemo as *const rb_method_entry_struct)
             }
@@ -1048,15 +1098,20 @@ ruby_version_v2_6_x!(ruby_2_6_5);
 ruby_version_v2_6_x!(ruby_2_6_6);
 ruby_version_v2_6_x!(ruby_2_6_7);
 ruby_version_v2_6_x!(ruby_2_6_8);
+ruby_version_v2_6_x!(ruby_2_6_9);
 ruby_version_v2_7_x!(ruby_2_7_0);
 ruby_version_v2_7_x!(ruby_2_7_1);
 ruby_version_v2_7_x!(ruby_2_7_2);
 ruby_version_v2_7_x!(ruby_2_7_3);
 ruby_version_v2_7_x!(ruby_2_7_4);
+ruby_version_v2_7_x!(ruby_2_7_5);
 ruby_version_v3_0_x!(ruby_3_0_0);
 ruby_version_v3_0_x!(ruby_3_0_1);
 ruby_version_v3_0_x!(ruby_3_0_2);
+ruby_version_v3_0_x!(ruby_3_0_3);
+ruby_version_v3_1_x!(ruby_3_1_0);
 
+#[cfg(not(debug_assertions))]
 #[cfg(test)]
 mod tests {
     use rbspy_testdata::*;
@@ -1143,6 +1198,55 @@ mod tests {
                 name: "block in <main>".to_string(),
                 relative_path: "ci/ruby-programs/infinite.rb".to_string(),
                 absolute_path: Some("/vagrant/ci/ruby-programs/infinite.rb".to_string()),
+                lineno: 15,
+            },
+            StackFrame {
+                name: "loop [c function]".to_string(),
+                relative_path: "(unknown)".to_string(),
+                absolute_path: None,
+                lineno: 0,
+            },
+        ]
+    }
+
+    fn real_stack_trace_3_1_0() -> Vec<StackFrame> {
+        vec![
+            StackFrame {
+                name: "sleep [c function]".to_string(),
+                relative_path: "(unknown)".to_string(),
+                absolute_path: None,
+                lineno: 0,
+            },
+            StackFrame {
+                name: "aaa".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/acj/workspace/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
+                lineno: 3,
+            },
+            StackFrame {
+                name: "bbb".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/acj/workspace/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
+                lineno: 7,
+            },
+            StackFrame {
+                name: "ccc".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/acj/workspace/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
+                lineno: 11,
+            },
+            StackFrame {
+                name: "block in <main>".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/acj/workspace/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
                 lineno: 15,
             },
             StackFrame {
@@ -1369,6 +1473,22 @@ mod tests {
 
     #[cfg(target_pointer_width = "64")]
     #[test]
+    fn test_get_ruby_stack_trace_2_7_5() {
+        let current_thread_addr = 0x7fdd8d626070;
+        let global_symbols_addr = Some(0x7fdd8d60eb80);
+        let stack_trace = ruby_version::ruby_2_7_5::get_stack_trace::<CoreDump>(
+            current_thread_addr,
+            0,
+            global_symbols_addr,
+            &coredump_2_7_2(),
+            0,
+        )
+        .unwrap();
+        assert_eq!(real_stack_trace_2_7_2(), stack_trace.trace);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
     fn test_get_ruby_stack_trace_3_0_0() {
         let source = coredump_3_0_0();
         let vm_addr = 0x7fdacdab7470;
@@ -1416,5 +1536,39 @@ mod tests {
         )
         .unwrap();
         assert_eq!(real_stack_trace_2_7_2(), stack_trace.trace);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn test_get_ruby_stack_trace_3_0_3() {
+        let source = coredump_3_0_0();
+        let vm_addr = 0x7fdacdab7470;
+        let global_symbols_addr = Some(0x7fdacdaa9d80);
+        let stack_trace = ruby_version::ruby_3_0_3::get_stack_trace::<CoreDump>(
+            0,
+            vm_addr,
+            global_symbols_addr,
+            &source,
+            0,
+        )
+        .unwrap();
+        assert_eq!(real_stack_trace_2_7_2(), stack_trace.trace);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn test_get_ruby_stack_trace_3_1_0() {
+        let source = coredump_3_1_0();
+        let vm_addr = 0x7f0dc0c83c58;
+        let global_symbols_addr = Some(0x7f0dc0c75e80);
+        let stack_trace = ruby_version::ruby_3_1_0::get_stack_trace::<CoreDump>(
+            0,
+            vm_addr,
+            global_symbols_addr,
+            &source,
+            0,
+        )
+        .unwrap();
+        assert_eq!(real_stack_trace_3_1_0(), stack_trace.trace);
     }
 }

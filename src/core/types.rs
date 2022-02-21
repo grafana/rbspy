@@ -4,10 +4,11 @@ use std::fmt;
 use std::time::SystemTime;
 use std::{self, convert::From};
 
-use anyhow::{Error, Result};
+use anyhow::Error;
+use remoteprocess::Pid;
 use thiserror::Error;
 
-pub use remoteprocess::{Pid, Process, ProcessMemory};
+use crate::ui::*;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub(crate) struct Header {
@@ -44,10 +45,6 @@ pub enum MemoryCopyError {
     ProcessEnded,
     #[error("Copy error: {}", _0)]
     Message(String),
-    #[error("Too much memory requested when copying: {}", _0)]
-    RequestTooLarge(usize),
-    #[error("Tried to read invalid string")]
-    InvalidStringError(std::string::FromUtf8Error),
     #[error("Tried to read invalid memory address {:x}", _0)]
     InvalidAddressError(usize),
 }
@@ -99,6 +96,13 @@ impl StackTrace {
     }
 }
 
+impl fmt::Display for StackTrace {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let frames: Vec<String> = self.iter().rev().map(|s| s.to_string()).collect();
+        write!(f, "{}", frames.join("\n"))
+    }
+}
+
 impl From<Error> for MemoryCopyError {
     fn from(error: Error) -> Self {
         let addr = *error.downcast_ref::<usize>().unwrap_or(&0);
@@ -111,37 +115,54 @@ impl From<Error> for MemoryCopyError {
         match error.raw_os_error() {
             // Sometimes Windows returns this error code
             Some(0) => MemoryCopyError::OperationSucceeded,
-            /* On Mac, 60 seems to correspond to the process ended */
-            /* On Windows, 299 happens when the process ended */
-            Some(3) | Some(60) | Some(299) => MemoryCopyError::ProcessEnded,
             // On *nix EFAULT means that the address was invalid
             Some(14) => MemoryCopyError::InvalidAddressError(addr),
             _ => MemoryCopyError::Io(addr, error),
         }
     }
 }
-pub trait ProcessRetry {
-    fn new_with_retry(pid: Pid) -> Result<Process>;
+
+arg_enum! {
+    /// File formats into which rbspy can convert its recorded traces
+
+    // The values of this enum get translated directly to command line arguments. Make them
+    // lowercase so that we don't have camelcase command line arguments
+    #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
+    #[allow(non_camel_case_types)]
+    pub enum OutputFormat {
+        flamegraph,
+        collapsed,
+        callgrind,
+        speedscope,
+        pprof,
+        summary,
+        summary_by_line,
+    }
 }
 
-impl ProcessRetry for remoteprocess::Process {
-    // It can take a moment for the ruby process to spin up, so new_with_retry automatically
-    // retries for a few seconds. This delay mostly seems to affect macOS and Windows and is
-    // especially common in CI environments.
-    fn new_with_retry(pid: Pid) -> Result<Process> {
-        let retry_interval = std::time::Duration::from_millis(10);
-        let mut retries = 500;
-        loop {
-            match Process::new(pid) {
-                Ok(p) => return Ok(p),
-                Err(e) => {
-                    if retries == 0 {
-                        return Err(e)?;
-                    }
-                    std::thread::sleep(retry_interval);
-                    retries -= 1;
-                }
-            }
+impl OutputFormat {
+    pub fn outputter(self, flame_min_width: f64) -> Box<dyn output::Outputter> {
+        match self {
+            OutputFormat::flamegraph => Box::new(output::Flamegraph::new(flame_min_width)),
+            OutputFormat::collapsed => Box::new(output::Collapsed::default()),
+            OutputFormat::callgrind => Box::new(output::Callgrind(callgrind::Stats::new())),
+            OutputFormat::speedscope => Box::new(output::Speedscope(speedscope::Stats::new())),
+            OutputFormat::pprof => Box::new(output::Pprof(pprof::Stats::new())),
+            OutputFormat::summary => Box::new(output::Summary(summary::Stats::new())),
+            OutputFormat::summary_by_line => Box::new(output::SummaryLine(summary::Stats::new())),
         }
+    }
+
+    pub fn extension(&self) -> String {
+        match *self {
+            OutputFormat::flamegraph => "flamegraph.svg",
+            OutputFormat::collapsed => "collapsed.txt",
+            OutputFormat::callgrind => "callgrind.txt",
+            OutputFormat::speedscope => "speedscope.json",
+            OutputFormat::pprof => "profile.pb.gz",
+            OutputFormat::summary => "summary.txt",
+            OutputFormat::summary_by_line => "summary_by_line.txt",
+        }
+        .to_string()
     }
 }
