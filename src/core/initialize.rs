@@ -26,6 +26,7 @@ pub fn initialize(
     pid: Pid,
     lock_process: bool,
     force_version: Option<String>,
+    on_cpu: bool,
 ) -> Result<StackTraceGetter> {
     #[cfg(all(windows, target_arch = "x86_64"))]
     if is_wow64_process(pid).context("check wow64 process")? {
@@ -51,6 +52,7 @@ pub fn initialize(
         reinit_count: 0,
         lock_process,
         force_version,
+        on_cpu,
     })
 }
 
@@ -64,21 +66,30 @@ pub struct StackTraceGetter {
     reinit_count: u32,
     lock_process: bool,
     force_version: Option<String>,
+    on_cpu: bool,
 }
 
 impl StackTraceGetter {
-    pub fn get_trace(&mut self) -> Result<StackTrace> {
+    pub fn get_trace(&mut self) -> Result<Option<StackTrace>> {
+        /* First, trying OS specific checks to determine whether the process is on CPU or not.
+         * This comes before locking the process because in most operating systems locking
+         * means the process is stopped */
+        if self.on_cpu && !self.is_on_cpu_os_specific()? {
+            return Ok(None);
+        }
+
         match self.get_trace_from_current_thread() {
-            Ok(mut trace) => {
+            Ok(Some(mut trace)) => {
                 return {
                     /* This is a spike to enrich the trace with the pid.
                      * This is needed, because remoteprocess' ProcessMemory
                      * trait does not expose pid.
                      */
                     trace.pid = Some(self.process.pid);
-                    Ok(trace)
+                    Ok(Some(trace))
                 };
             }
+            Ok(None) => return Ok(None),
             Err(MemoryCopyError::InvalidAddressError(addr))
                 if addr == self.current_thread_addr_location => {}
             Err(e) => {
@@ -88,14 +99,26 @@ impl StackTraceGetter {
                 return Err(e.into());
             }
         }
+
         debug!("Thread address location invalid, reinitializing");
         self.reinitialize().context("reinitialize")?;
+
         Ok(self
             .get_trace_from_current_thread()
             .context("get trace from current thread")?)
     }
 
-    fn get_trace_from_current_thread(&self) -> Result<StackTrace, MemoryCopyError> {
+    fn is_on_cpu_os_specific(&self) -> Result<bool> {
+        // remoteprocess crate exposes a Thread.active() method for each of these targets
+        for thread in self.process.threads()?.iter() {
+            if thread.active()? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn get_trace_from_current_thread(&self) -> Result<Option<StackTrace>, MemoryCopyError> {
         let stack_trace_function = &self.stack_trace_function;
 
         let _lock;
@@ -112,6 +135,7 @@ impl StackTraceGetter {
             self.global_symbols_addr_location,
             &self.process,
             self.process.pid,
+            self.on_cpu,
         )
     }
 
@@ -140,8 +164,16 @@ pub type IsMaybeThreadFn = Box<dyn Fn(usize, usize, &Process, &[MapRange]) -> bo
 
 // Everything below here is private
 
-type StackTraceFn =
-    Box<dyn Fn(usize, usize, Option<usize>, &Process, Pid) -> Result<StackTrace, MemoryCopyError>>;
+type StackTraceFn = Box<
+    dyn Fn(
+        usize,
+        usize,
+        Option<usize>,
+        &Process,
+        Pid,
+        bool,
+    ) -> Result<Option<StackTrace>, MemoryCopyError>,
+>;
 
 fn get_process_ruby_state(
     pid: Pid,

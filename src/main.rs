@@ -39,12 +39,14 @@ enum SubCmd {
         silent: bool,
         flame_min_width: f64,
         lock_process: bool,
+        on_cpu: bool,
         force_version: Option<String>,
     },
     /// Capture and print a stacktrace snapshot of process `pid`.
     Snapshot {
         pid: Pid,
         lock_process: bool,
+        on_cpu: bool,
         force_version: Option<String>,
     },
     Report {
@@ -104,9 +106,10 @@ fn do_main() -> Result<(), Error> {
             pid,
             lock_process,
             force_version,
+            on_cpu,
         } => {
-            let snap = recorder::snapshot(pid, lock_process, force_version)?;
-            println!("{}", snap);
+            let snap = recorder::snapshot(pid, lock_process, force_version, on_cpu)?;
+            println!("{:?}", snap);
             Ok(())
         }
         SubCmd::Record {
@@ -121,6 +124,7 @@ fn do_main() -> Result<(), Error> {
             silent,
             flame_min_width,
             lock_process,
+            on_cpu,
             force_version,
         } => {
             let pid = match target {
@@ -185,6 +189,7 @@ fn do_main() -> Result<(), Error> {
                 maybe_duration,
                 flame_min_width,
                 lock_process,
+                on_cpu,
                 force_version,
             };
 
@@ -285,6 +290,10 @@ fn arg_parser() -> clap::Command<'static> {
                         .required(false),
                 )
                 .arg(
+                    arg!(--on-cpu "oncpu")
+                        .required(false)
+                )
+                .arg(
                     clap::Arg::new("force-version")
                         .help("Assume that the Ruby version is <VERSION>. This is useful when the Ruby \
                             version is not yet supported by rbspy, e.g. a release candidate")
@@ -361,6 +370,10 @@ fn arg_parser() -> clap::Command<'static> {
                         .required(false),
                 )
                 .arg(
+                    arg!(--on-cpu "oncpu")
+                        .required(false)
+                )
+                .arg(
                     clap::Arg::new("force-version")
                         .help("Assume that the Ruby version is <VERSION>. This is useful when the Ruby \
                             version is not yet supported by rbspy, e.g. a release candidate")
@@ -421,6 +434,7 @@ impl Args {
                 pid: get_pid(submatches)
                     .expect("this shouldn't happen because clap requires a pid"),
                 lock_process: submatches.is_present("nonblocking"),
+                on_cpu: submatches.is_present("on-cpu"),
                 force_version: match submatches.value_of("force-version") {
                     Some(version) => Some(version.to_string()),
                     None => None,
@@ -440,6 +454,7 @@ impl Args {
                 let silent = submatches.is_present("silent");
                 let with_subprocesses = submatches.is_present("subprocesses");
                 let nonblocking = submatches.is_present("nonblocking");
+                let on_cpu = submatches.is_present("on-cpu");
 
                 let sample_rate = ArgMatches::value_of_t(submatches, "rate").unwrap();
                 let flame_min_width =
@@ -471,6 +486,7 @@ impl Args {
                     silent,
                     flame_min_width,
                     lock_process: !nonblocking,
+                    on_cpu,
                     force_version,
                 }
             }

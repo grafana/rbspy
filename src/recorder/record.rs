@@ -41,6 +41,7 @@ pub struct Config {
     ///
     /// This option shouldn't be needed unless you're testing a pre-release Ruby version.
     pub force_version: Option<String>,
+    pub on_cpu: bool,
 }
 
 pub struct Recorder {
@@ -62,6 +63,7 @@ impl Recorder {
             config.maybe_duration,
             config.with_subprocesses,
             config.force_version,
+            config.on_cpu,
         );
 
         Recorder {

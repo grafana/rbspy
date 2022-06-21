@@ -22,6 +22,7 @@ pub struct Sampler {
     total_traces: Arc<AtomicUsize>,
     with_subprocesses: bool,
     force_version: Option<String>,
+    on_cpu: bool,
 }
 
 impl Sampler {
@@ -32,6 +33,7 @@ impl Sampler {
         time_limit: Option<Duration>,
         with_subprocesses: bool,
         force_version: Option<String>,
+        on_cpu: bool,
     ) -> Self {
         Sampler {
             done: Arc::new(AtomicBool::new(false)),
@@ -43,6 +45,7 @@ impl Sampler {
             total_traces: Arc::new(AtomicUsize::new(0)),
             with_subprocesses,
             force_version,
+            on_cpu,
         }
     }
 
@@ -70,6 +73,7 @@ impl Sampler {
         };
         let lock_process = self.lock_process.clone();
         let force_version = self.force_version.clone();
+        let on_cpu = self.on_cpu.clone();
         let result_sender = result_sender.clone();
         let timing_error_traces = self.timing_error_traces.clone();
         let total_traces = self.total_traces.clone();
@@ -106,6 +110,8 @@ impl Sampler {
                         let total_traces = total_traces.clone();
                         let trace_sender_clone = trace_sender.clone();
                         let force_version = force_version.clone();
+                        let on_cpu = on_cpu.clone();
+
                         std::thread::spawn(move || {
                             let result = sample(
                                 pid,
@@ -117,6 +123,7 @@ impl Sampler {
                                 trace_sender_clone,
                                 lock_process,
                                 force_version,
+                                on_cpu,
                             );
                             result_sender.send(result).expect("couldn't send error");
                             drop(result_sender);
@@ -146,6 +153,7 @@ impl Sampler {
                     trace_sender,
                     lock_process,
                     force_version,
+                    on_cpu,
                 );
                 result_sender.send(result).unwrap();
                 drop(result_sender);
@@ -171,8 +179,9 @@ fn sample(
     sender: SyncSender<StackTrace>,
     lock_process: bool,
     force_version: Option<String>,
+    on_cpu: bool,
 ) -> Result<(), Error> {
-    let mut getter = initialize(pid, lock_process, force_version).context("initialize")?;
+    let mut getter = initialize(pid, lock_process, force_version, on_cpu).context("initialize")?;
 
     let mut total = 0;
     let mut errors = 0;
@@ -195,9 +204,10 @@ fn sample(
         total += 1;
         let trace = getter.get_trace();
         match trace {
-            Ok(ok_trace) => {
+            Ok(Some(ok_trace)) => {
                 sender.send(ok_trace).context("send trace")?;
             }
+            Ok(None) => {}
             Err(e) => {
                 if let Some(MemoryCopyError::ProcessEnded) = e.downcast_ref() {
                     debug!("Process {} ended", pid);
