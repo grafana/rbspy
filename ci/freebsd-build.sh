@@ -21,9 +21,10 @@ fi
 
 cargo build --release --workspace --all-targets
 cargo test --release -- \
-    --skip core::initialize::tests \
+    --skip core::ruby_spy::tests \
     --skip sampler::tests
 
+set +e
 tar cf build-artifacts.tar target
-tar rf build-artifacts.tar .cargo/git || true
-tar rf build-artifacts.tar .cargo/registry || true
+tar rf build-artifacts.tar .cargo/git
+tar rf build-artifacts.tar .cargo/registry

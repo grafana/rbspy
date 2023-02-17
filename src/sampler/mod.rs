@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 use winapi::um::timeapi;
 
-use crate::core::initialize::initialize;
 use crate::core::process::{Pid, Process, ProcessRetry};
 use crate::core::types::{MemoryCopyError, StackTrace};
 
@@ -181,7 +180,8 @@ fn sample(
     force_version: Option<String>,
     on_cpu: bool,
 ) -> Result<(), Error> {
-    let mut getter = initialize(pid, lock_process, force_version, on_cpu).context("initialize")?;
+    let mut process =
+        crate::core::ruby_spy::RubySpy::retry_new(pid, 10, force_version).context("new spy")?;
 
     let mut total = 0;
     let mut errors = 0;
@@ -202,7 +202,7 @@ fn sample(
 
     while !done.load(Ordering::Relaxed) {
         total += 1;
-        let trace = getter.get_trace();
+        let trace = process.get_stack_trace(lock_process, on_cpu);
         match trace {
             Ok(Some(ok_trace)) => {
                 sender.send(ok_trace).context("send trace")?;

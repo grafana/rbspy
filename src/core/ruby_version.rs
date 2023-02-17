@@ -8,6 +8,8 @@
  * Defines a bunch of submodules, one per Ruby version (`ruby_1_9_3`, `ruby_2_2_0`, etc.)
  */
 
+use semver::Version;
+
 macro_rules! ruby_version_v_1_9_1(
     ($ruby_version:ident) => (
         pub mod $ruby_version {
@@ -257,15 +259,12 @@ macro_rules! ruby_version_v3_1_x(
 macro_rules! get_execution_context_from_thread(
     ($thread_type:ident) => (
         pub fn get_execution_context<T: ProcessMemory>(
-            ruby_current_thread_address_location: usize,
-            _ruby_vm_address_location: usize,
+            current_thread_address_ptr: usize,
+            _ruby_vm_address_ptr: usize,
             source: &T
-        ) -> Result<$thread_type, MemoryCopyError> {
-            let current_thread_addr: usize = source.copy_struct(ruby_current_thread_address_location)
-                .context(ruby_current_thread_address_location)?;
-            let thread: $thread_type = source.copy_struct(current_thread_addr)
-                .context(current_thread_addr)?;
-            Ok(thread)
+        ) -> Result<usize> {
+            source.copy_struct(current_thread_address_ptr)
+                .context("couldn't read current thread pointer")
         }
     )
 );
@@ -273,18 +272,18 @@ macro_rules! get_execution_context_from_thread(
 macro_rules! get_execution_context_from_vm(
     () => (
         pub fn get_execution_context<T: ProcessMemory>(
-            _ruby_current_thread_address_location: usize,
-            ruby_vm_address_location: usize,
+            _current_thread_address_ptr: usize,
+            ruby_vm_address_ptr: usize,
             source: &T
-        ) -> Result<rb_execution_context_struct, MemoryCopyError> {
+        ) -> Result<usize> {
             // This is a roundabout way to get the execution context address, but it helps us
             // avoid platform-specific structures in memory (e.g. pthread types) that would
             // require us to maintain separate ruby-structs bindings for each platform due to
             // their varying sizes and alignments.
-            let vm_addr: usize = source.copy_struct(ruby_vm_address_location)
-                .context(ruby_vm_address_location)?;
+            let vm_addr: usize = source.copy_struct(ruby_vm_address_ptr)
+                .context("couldn't read Ruby VM pointer")?;
             let vm: rb_vm_struct = source.copy_struct(vm_addr as usize)
-                .context(vm_addr)?;
+                .context("couldn't read Ruby VM struct")?;
 
             // Seek forward in the ractor struct, looking for the main thread's address. There
             // may be other copies of the main thread address in the ractor struct, so it's
@@ -296,16 +295,18 @@ macro_rules! get_execution_context_from_vm(
             let main_ractor_address = vm.ractor.main_ractor as usize;
             let candidate_addresses: [usize; ADDRESSES_TO_CHECK] =
                 source.copy_struct(main_ractor_address + initial_offset)
-                    .context(main_ractor_address)?;
-            let matching_index =
-                candidate_addresses
-                .iter()
-                .position(|&addr| addr == vm.ractor.main_thread as usize)
-                .ok_or(format_err!("couldn't find current execution context"))?;
-            let running_ec_address = candidate_addresses[matching_index - 1];
-            let ec: rb_execution_context_struct = source.copy_struct(running_ec_address as usize)
-                .context(running_ec_address)?;
-            Ok(ec)
+                    .context("couldn't read main ractor struct")?;
+
+            candidate_addresses
+            .iter()
+            .enumerate()
+            .filter(|(_, &addr)| addr == vm.ractor.main_thread as usize)
+            .map(|(i, _)| candidate_addresses[i - 1])
+            .filter(|&addr| addr != 0)
+            .filter(|&addr| source.copy_struct::<rb_execution_context_struct>(addr as usize).is_ok())
+            .collect::<Vec<usize>>()
+            .pop()
+            .ok_or(format_err!("couldn't find main thread execution context"))
         }
     )
 );
@@ -313,7 +314,7 @@ macro_rules! get_execution_context_from_vm(
 macro_rules! get_stack_trace(
     ($thread_type:ident) => (
         use crate::core::process::Pid;
-        use crate::core::types::{StackFrame, StackTrace, MemoryCopyError};
+        use crate::core::types::{StackFrame, StackTrace};
 
         pub fn get_stack_trace<T: ProcessMemory>(
             ruby_current_thread_address_location: usize,
@@ -322,9 +323,11 @@ macro_rules! get_stack_trace(
             source: &T,
             pid: Pid,
             on_cpu: bool,
-        ) -> Result<Option<StackTrace>, MemoryCopyError> {
-            let thread: $thread_type = get_execution_context(ruby_current_thread_address_location, ruby_vm_address_location, source)
-                .context(ruby_current_thread_address_location)?;
+        ) -> Result<Option<StackTrace>, anyhow::Error> {
+            let current_thread_addr: usize = get_execution_context(ruby_current_thread_address_location, ruby_vm_address_location, source)
+                .context("couldn't get execution context")?;
+            let thread: $thread_type = source.copy_struct(current_thread_addr)
+                .context("couldn't get current thread")?;
 
             // testing the thread state in the interpreter.
             if on_cpu && get_thread_status(&thread, source)? != rb_thread_status_THREAD_RUNNABLE /* THREAD_RUNNABLE */ {
@@ -409,15 +412,23 @@ macro_rules! get_stack_trace(
         }
 
         fn stack_base(thread: &$thread_type) -> i64 {
+            // Ruby stack grows down, starting at
+            //   ruby_current_thread->stack + ruby_current_thread->stack_size - 1 * sizeof(rb_control_frame_t)
+            // I don't know what the -1 is about. Also note that the stack_size is *not* in bytes! stack is a
+            // VALUE*, and so stack_size is in units of sizeof(VALUE).
+            //
+            // The base of the call stack is therefore at
+            //   stack + stack_size * sizeof(VALUE) - sizeof(rb_control_frame_t)
+            // (with everything in bytes).
             stack_field(thread) + stack_size_field(thread) * std::mem::size_of::<VALUE>() as i64 - 1 * std::mem::size_of::<rb_control_frame_t>() as i64
         }
 
-        pub fn is_maybe_thread<T>(x: usize, x_addr: usize, source: &T, all_maps: &[MapRange]) -> bool where T: ProcessMemory {
-            if !maps_contain_addr(x, all_maps) {
+        pub fn is_maybe_thread<T>(candidate_thread_addr: usize, candidate_thread_addr_ptr: usize, source: &T, all_maps: &[MapRange]) -> bool where T: ProcessMemory {
+            if !maps_contain_addr(candidate_thread_addr, all_maps) {
                 return false;
             }
 
-            let thread: $thread_type = match source.copy_struct(x) {
+            let thread: $thread_type = match source.copy_struct(candidate_thread_addr) {
                 Ok(x) => x,
                 _ => { return false; },
             };
@@ -427,7 +438,7 @@ macro_rules! get_stack_trace(
             }
 
             // finally, try to get an actual stack trace from the source and see if it works
-            get_stack_trace(x_addr, 0, None, source, 0, false).is_ok()
+            get_stack_trace(candidate_thread_addr_ptr, 0, None, source, 0, false).is_ok()
         }
     )
 );
@@ -460,7 +471,7 @@ macro_rules! stack_field_2_5_0(
 macro_rules! get_thread_status_1_9_0(
     () => (
 
-        fn get_thread_status<T>(thread_struct: &rb_thread_struct, _source: &T) -> Result<u32, MemoryCopyError> {
+        fn get_thread_status<T>(thread_struct: &rb_thread_struct, _source: &T) -> Result<u32> {
             Ok(thread_struct.status as u32)
         }
     )
@@ -470,7 +481,7 @@ macro_rules! get_thread_status_2_5_0(
     () => (
 
         fn get_thread_status<T>(thread_struct: &rb_execution_context_struct, source: &T)
-                            -> Result<u32, MemoryCopyError> where T: ProcessMemory {
+                            -> Result<u32> where T: ProcessMemory {
             let thread: rb_thread_struct = source.copy_struct(thread_struct.thread_ptr as usize)
                 .context(thread_struct.thread_ptr as usize)?;
             Ok(thread.status as u32)
@@ -483,7 +494,7 @@ macro_rules! get_thread_status_2_6_0(
     () => (
 
         fn get_thread_status<T>(thread_struct: &rb_execution_context_struct, source: &T)
-                            -> Result<u32, MemoryCopyError> where T: ProcessMemory {
+                            -> Result<u32> where T: ProcessMemory {
             let thread: rb_thread_struct = source.copy_struct(thread_struct.thread_ptr as usize)
                 .context(thread_struct.thread_ptr as usize)?;
             Ok(thread.status() as u32)
@@ -494,7 +505,7 @@ macro_rules! get_thread_status_2_6_0(
 macro_rules! get_thread_id_1_9_0(
     () => (
 
-        fn get_thread_id<T>(thread_struct: &rb_thread_struct, _source: &T) -> Result<usize, MemoryCopyError> {
+        fn get_thread_id<T>(thread_struct: &rb_thread_struct, _source: &T) -> Result<usize> {
             Ok(thread_struct.thread_id as usize)
         }
     )
@@ -504,7 +515,7 @@ macro_rules! get_thread_id_2_5_0(
     () => (
 
         fn get_thread_id<T>(thread_struct: &rb_execution_context_struct, source: &T)
-                            -> Result<usize, MemoryCopyError> where T: ProcessMemory {
+                            -> Result<usize> where T: ProcessMemory {
             let thread: rb_thread_struct = source.copy_struct(thread_struct.thread_ptr as usize)
                 .context(thread_struct.thread_ptr as usize)?;
             Ok(thread.thread_id as usize)
@@ -515,7 +526,7 @@ macro_rules! get_thread_id_2_5_0(
 macro_rules! get_ruby_string_array_2_5_0(
     () => (
         // Returns (path, absolute_path)
-        fn get_ruby_string_array<T>(addr: usize, string_class: usize, source: &T) -> Result<(String, String), MemoryCopyError> where T: ProcessMemory {
+        fn get_ruby_string_array<T>(addr: usize, string_class: usize, source: &T) -> Result<(String, String)> where T: ProcessMemory {
             // todo: we're doing an extra copy here for no reason
             let rstring: RString = source.copy_struct(addr)
                 .context(addr)?;
@@ -564,7 +575,7 @@ macro_rules! get_ruby_string(
         fn get_ruby_string<T>(
             addr: usize,
             source: &T
-        ) -> Result<String, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<String> where T: ProcessMemory {
             let vec = {
                 let rstring: RString = source.copy_struct(addr)
                     .context(addr)?;
@@ -591,9 +602,9 @@ macro_rules! get_ruby_string(
             };
 
             let error =
-                MemoryCopyError::Message("Ruby string is invalid".to_string());
+                crate::core::types::MemoryCopyError::Message("Ruby string is invalid".to_string());
 
-            String::from_utf8(vec).or(Err(error))
+            String::from_utf8(vec).or(Err(error.into()))
         }
     )
 );
@@ -604,7 +615,7 @@ macro_rules! get_stack_frame_1_9_1(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-            ) -> Result<StackFrame, MemoryCopyError> where T: ProcessMemory {
+            ) -> Result<StackFrame> where T: ProcessMemory {
             Ok(StackFrame{
                 name: get_ruby_string(iseq_struct.name as usize, source)?,
                 relative_path: get_ruby_string(iseq_struct.filename as usize, source)?,
@@ -621,7 +632,7 @@ macro_rules! get_stack_frame_1_9_2(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-            ) -> Result<StackFrame, MemoryCopyError> where T: ProcessMemory {
+            ) -> Result<StackFrame> where T: ProcessMemory {
             Ok(StackFrame{
                 name: get_ruby_string(iseq_struct.name as usize, source)?,
                 relative_path: get_ruby_string(iseq_struct.filename as usize, source)?,
@@ -638,7 +649,7 @@ macro_rules! get_lineno_1_9_0(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<u32> where T: ProcessMemory {
             let pos = get_pos(iseq_struct, cfp)?;
             let t_size = iseq_struct.insn_info_size as usize;
             if t_size == 0 {
@@ -669,7 +680,7 @@ macro_rules! get_lineno_2_0_0(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<u32> where T: ProcessMemory {
             let pos = get_pos(iseq_struct, cfp)?;
             let t_size = iseq_struct.line_info_size as usize;
             if t_size == 0 {
@@ -700,7 +711,7 @@ macro_rules! get_lineno_2_3_0(
             iseq_struct: &rb_iseq_constant_body,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<u32> where T: ProcessMemory {
             let pos = get_pos(iseq_struct, cfp)?;
             let t_size = iseq_struct.line_info_size as usize;
             if t_size == 0 {
@@ -728,9 +739,9 @@ macro_rules! get_lineno_2_3_0(
 macro_rules! get_pos(
     ($iseq_type:ident) => (
         #[allow(unused)] // this doesn't get used in every ruby version
-        fn get_pos(iseq_struct: &$iseq_type, cfp: &rb_control_frame_t) -> Result<usize, MemoryCopyError> {
+        fn get_pos(iseq_struct: &$iseq_type, cfp: &rb_control_frame_t) -> Result<usize> {
             if (cfp.pc as usize) < (iseq_struct.iseq_encoded as usize) {
-                return Err(MemoryCopyError::Message(format!("program counter and iseq are out of sync")));
+                return Err(crate::core::types::MemoryCopyError::Message(format!("program counter and iseq are out of sync")).into());
             }
             let mut pos = cfp.pc as usize - iseq_struct.iseq_encoded as usize;
             if pos != 0 {
@@ -747,7 +758,7 @@ macro_rules! get_lineno_2_5_0(
             iseq_struct: &rb_iseq_constant_body,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<u32> where T: ProcessMemory {
             let pos = get_pos(iseq_struct, cfp)?;
             let t_size = iseq_struct.insns_info_size as usize;
             if t_size == 0 {
@@ -778,7 +789,7 @@ macro_rules! get_lineno_2_6_0(
             iseq_struct: &rb_iseq_constant_body,
             _cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<u32> where T: ProcessMemory {
             //let pos = get_pos(iseq_struct, cfp)?;
             let t_size = iseq_struct.insns_info.size as usize;
             if t_size == 0 {
@@ -811,7 +822,7 @@ macro_rules! get_stack_frame_2_0_0(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<StackFrame, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<StackFrame> where T: ProcessMemory {
             Ok(StackFrame{
                 name: get_ruby_string(iseq_struct.location.label as usize, source)?,
                 relative_path: get_ruby_string(iseq_struct.location.path as usize, source)?,
@@ -828,7 +839,7 @@ macro_rules! get_stack_frame_2_3_0(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<StackFrame, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<StackFrame> where T: ProcessMemory {
             let body: rb_iseq_constant_body = source.copy_struct(iseq_struct.body as usize)
                 .context(iseq_struct.body as usize)?;
             Ok(StackFrame{
@@ -847,7 +858,7 @@ macro_rules! get_stack_frame_2_5_0(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<StackFrame, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<StackFrame> where T: ProcessMemory {
             let body: rb_iseq_constant_body = source.copy_struct(iseq_struct.body as usize)
                 .context(iseq_struct.body as usize)?;
             let rstring: RString = source.copy_struct(body.location.label as usize)
@@ -866,23 +877,15 @@ macro_rules! get_stack_frame_2_5_0(
 
 macro_rules! get_cfps(
     () => (
-        // Ruby stack grows down, starting at
-        //   ruby_current_thread->stack + ruby_current_thread->stack_size - 1 * sizeof(rb_control_frame_t)
-        // I don't know what the -1 is about. Also note that the stack_size is *not* in bytes! stack is a
-        // VALUE*, and so stack_size is in units of sizeof(VALUE).
-        //
-        // The base of the call stack is therefore at
-        //   stack + stack_size * sizeof(VALUE) - sizeof(rb_control_frame_t)
-        // (with everything in bytes).
         fn get_cfps<T>(
             cfp_address: usize,
             stack_base: usize,
             source: &T
-        ) -> Result<Vec<rb_control_frame_t>, MemoryCopyError> where T: ProcessMemory {
+        ) -> Result<Vec<rb_control_frame_t>> where T: ProcessMemory {
             if (stack_base as usize) <= cfp_address {
                 // this probably means we've hit some kind of race, return an error so we can try
                 // again
-                return Err(MemoryCopyError::Message(format!("stack base and cfp address out of sync. stack base: {:x}, cfp address: {:x}", stack_base as usize, cfp_address)));
+                return Err(crate::core::types::MemoryCopyError::Message(format!("stack base and cfp address out of sync. stack base: {:x}, cfp address: {:x}", stack_base as usize, cfp_address)).into());
             }
 
             Ok(
@@ -896,7 +899,7 @@ macro_rules! get_cfps(
 
 macro_rules! get_cfunc_name_unsupported(
     () => (
-        fn get_cfunc_name<T: ProcessMemory>(_cfp: &rb_control_frame_t, _global_symbols_address: usize, _source: &T, _pid: Pid) -> Result<String, MemoryCopyError> {
+        fn get_cfunc_name<T: ProcessMemory>(_cfp: &rb_control_frame_t, _global_symbols_address: usize, _source: &T, _pid: Pid) -> Result<String> {
             return Err(format_err!("C function resolution is not supported for this version of Ruby").into());
         }
     )
@@ -907,7 +910,7 @@ macro_rules! get_cfunc_name(
         fn check_method_entry<T: ProcessMemory>(
             raw_imemo: usize,
             source: &T
-        ) -> Result<*const rb_method_entry_struct, MemoryCopyError> {
+        ) -> Result<*const rb_method_entry_struct> {
             let imemo: rb_method_entry_struct = source.copy_struct(raw_imemo).context(raw_imemo)?;
 
             // These type constants are defined in ruby's internal/imemo.h
@@ -927,7 +930,7 @@ macro_rules! get_cfunc_name(
             global_symbols_address: usize,
             source: &T,
             _pid: Pid
-        ) -> Result<String, MemoryCopyError> {
+        ) -> Result<String> {
             // The logic in this function is adapted from the .gdbinit script in
             // github.com/ruby/ruby, in particular the print_id function.
 
@@ -1118,6 +1121,1513 @@ ruby_version_v3_0_x!(ruby_3_0_4);
 ruby_version_v3_1_x!(ruby_3_1_0);
 ruby_version_v3_1_x!(ruby_3_1_1);
 ruby_version_v3_1_x!(ruby_3_1_2);
+
+pub fn get_execution_context(version: &Version) -> crate::core::types::GetExecutionContextFn {
+    let function = match version {
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 1,
+            ..
+        } => ruby_1_9_1_0::get_execution_context,
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 2,
+            ..
+        } => ruby_1_9_2_0::get_execution_context,
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 3,
+            ..
+        } => ruby_1_9_3_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 0,
+            patch: 0,
+            ..
+        } => ruby_2_0_0_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 0,
+            ..
+        } => ruby_2_1_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 1,
+            ..
+        } => ruby_2_1_1::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 2,
+            ..
+        } => ruby_2_1_2::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 3,
+            ..
+        } => ruby_2_1_3::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 4,
+            ..
+        } => ruby_2_1_4::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 5,
+            ..
+        } => ruby_2_1_5::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 6,
+            ..
+        } => ruby_2_1_6::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 7,
+            ..
+        } => ruby_2_1_7::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 8,
+            ..
+        } => ruby_2_1_8::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 9,
+            ..
+        } => ruby_2_1_9::get_execution_context,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 10,
+            ..
+        } => ruby_2_1_10::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 0,
+            ..
+        } => ruby_2_2_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 1,
+            ..
+        } => ruby_2_2_1::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 2,
+            ..
+        } => ruby_2_2_2::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 3,
+            ..
+        } => ruby_2_2_3::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 4,
+            ..
+        } => ruby_2_2_4::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 5,
+            ..
+        } => ruby_2_2_5::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 6,
+            ..
+        } => ruby_2_2_6::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 7,
+            ..
+        } => ruby_2_2_7::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 8,
+            ..
+        } => ruby_2_2_8::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 9,
+            ..
+        } => ruby_2_2_9::get_execution_context,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 10,
+            ..
+        } => ruby_2_2_10::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 0,
+            ..
+        } => ruby_2_3_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 1,
+            ..
+        } => ruby_2_3_1::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 2,
+            ..
+        } => ruby_2_3_2::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 3,
+            ..
+        } => ruby_2_3_3::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 4,
+            ..
+        } => ruby_2_3_4::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 5,
+            ..
+        } => ruby_2_3_5::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 6,
+            ..
+        } => ruby_2_3_6::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 7,
+            ..
+        } => ruby_2_3_7::get_execution_context,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 8,
+            ..
+        } => ruby_2_3_8::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 0,
+            ..
+        } => ruby_2_4_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 1,
+            ..
+        } => ruby_2_4_1::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 2,
+            ..
+        } => ruby_2_4_2::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 3,
+            ..
+        } => ruby_2_4_3::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 4,
+            ..
+        } => ruby_2_4_4::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 5,
+            ..
+        } => ruby_2_4_5::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 6,
+            ..
+        } => ruby_2_4_6::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 7,
+            ..
+        } => ruby_2_4_7::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 8,
+            ..
+        } => ruby_2_4_8::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 9,
+            ..
+        } => ruby_2_4_9::get_execution_context,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 10,
+            ..
+        } => ruby_2_4_10::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 0,
+            ..
+        } => ruby_2_5_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 1,
+            ..
+        } => ruby_2_5_1::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 2,
+            ..
+        } => ruby_2_5_2::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 3,
+            ..
+        } => ruby_2_5_3::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 4,
+            ..
+        } => ruby_2_5_4::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 5,
+            ..
+        } => ruby_2_5_5::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 6,
+            ..
+        } => ruby_2_5_6::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 7,
+            ..
+        } => ruby_2_5_7::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 8,
+            ..
+        } => ruby_2_5_8::get_execution_context,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 9,
+            ..
+        } => ruby_2_5_9::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 0,
+            ..
+        } => ruby_2_6_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 1,
+            ..
+        } => ruby_2_6_1::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 2,
+            ..
+        } => ruby_2_6_2::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 3,
+            ..
+        } => ruby_2_6_3::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 4,
+            ..
+        } => ruby_2_6_4::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 5,
+            ..
+        } => ruby_2_6_5::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 6,
+            ..
+        } => ruby_2_6_6::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 7,
+            ..
+        } => ruby_2_6_7::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 8,
+            ..
+        } => ruby_2_6_8::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 9,
+            ..
+        } => ruby_2_6_9::get_execution_context,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 10,
+            ..
+        } => ruby_2_6_10::get_execution_context,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 0,
+            ..
+        } => ruby_2_7_0::get_execution_context,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 1,
+            ..
+        } => ruby_2_7_1::get_execution_context,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 2,
+            ..
+        } => ruby_2_7_2::get_execution_context,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 3,
+            ..
+        } => ruby_2_7_3::get_execution_context,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 4,
+            ..
+        } => ruby_2_7_4::get_execution_context,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 5,
+            ..
+        } => ruby_2_7_5::get_execution_context,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 6,
+            ..
+        } => ruby_2_7_6::get_execution_context,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 0,
+            ..
+        } => ruby_3_0_0::get_execution_context,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 1,
+            ..
+        } => ruby_3_0_1::get_execution_context,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 2,
+            ..
+        } => ruby_3_0_2::get_execution_context,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 3,
+            ..
+        } => ruby_3_0_3::get_execution_context,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 4,
+            ..
+        } => ruby_3_0_4::get_execution_context,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 0,
+            ..
+        } => ruby_3_1_0::get_execution_context,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 1,
+            ..
+        } => ruby_3_1_1::get_execution_context,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 2,
+            ..
+        } => ruby_3_1_2::get_execution_context,
+        _ => panic!(
+            "Ruby version not supported yet: {}. Please create a GitHub issue and we'll fix it!",
+            version
+        ),
+    };
+    // function(thread_address, vm_address, &source)
+    Box::new(function)
+}
+
+pub fn is_maybe_thread_function(version: &Version) -> crate::core::types::IsMaybeThreadFn {
+    let function = match version {
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 1,
+            ..
+        } => ruby_1_9_1_0::is_maybe_thread,
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 2,
+            ..
+        } => ruby_1_9_2_0::is_maybe_thread,
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 3,
+            ..
+        } => ruby_1_9_3_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 0,
+            patch: 0,
+            ..
+        } => ruby_2_0_0_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 0,
+            ..
+        } => ruby_2_1_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 1,
+            ..
+        } => ruby_2_1_1::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 2,
+            ..
+        } => ruby_2_1_2::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 3,
+            ..
+        } => ruby_2_1_3::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 4,
+            ..
+        } => ruby_2_1_4::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 5,
+            ..
+        } => ruby_2_1_5::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 6,
+            ..
+        } => ruby_2_1_6::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 7,
+            ..
+        } => ruby_2_1_7::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 8,
+            ..
+        } => ruby_2_1_8::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 9,
+            ..
+        } => ruby_2_1_9::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 10,
+            ..
+        } => ruby_2_1_10::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 0,
+            ..
+        } => ruby_2_2_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 1,
+            ..
+        } => ruby_2_2_1::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 2,
+            ..
+        } => ruby_2_2_2::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 3,
+            ..
+        } => ruby_2_2_3::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 4,
+            ..
+        } => ruby_2_2_4::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 5,
+            ..
+        } => ruby_2_2_5::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 6,
+            ..
+        } => ruby_2_2_6::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 7,
+            ..
+        } => ruby_2_2_7::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 8,
+            ..
+        } => ruby_2_2_8::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 9,
+            ..
+        } => ruby_2_2_9::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 10,
+            ..
+        } => ruby_2_2_10::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 0,
+            ..
+        } => ruby_2_3_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 1,
+            ..
+        } => ruby_2_3_1::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 2,
+            ..
+        } => ruby_2_3_2::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 3,
+            ..
+        } => ruby_2_3_3::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 4,
+            ..
+        } => ruby_2_3_4::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 5,
+            ..
+        } => ruby_2_3_5::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 6,
+            ..
+        } => ruby_2_3_6::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 7,
+            ..
+        } => ruby_2_3_7::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 8,
+            ..
+        } => ruby_2_3_8::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 0,
+            ..
+        } => ruby_2_4_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 1,
+            ..
+        } => ruby_2_4_1::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 2,
+            ..
+        } => ruby_2_4_2::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 3,
+            ..
+        } => ruby_2_4_3::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 4,
+            ..
+        } => ruby_2_4_4::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 5,
+            ..
+        } => ruby_2_4_5::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 6,
+            ..
+        } => ruby_2_4_6::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 7,
+            ..
+        } => ruby_2_4_7::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 8,
+            ..
+        } => ruby_2_4_8::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 9,
+            ..
+        } => ruby_2_4_9::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 10,
+            ..
+        } => ruby_2_4_10::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 0,
+            ..
+        } => ruby_2_5_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 1,
+            ..
+        } => ruby_2_5_1::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 2,
+            ..
+        } => ruby_2_5_2::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 3,
+            ..
+        } => ruby_2_5_3::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 4,
+            ..
+        } => ruby_2_5_4::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 5,
+            ..
+        } => ruby_2_5_5::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 6,
+            ..
+        } => ruby_2_5_6::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 7,
+            ..
+        } => ruby_2_5_7::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 8,
+            ..
+        } => ruby_2_5_8::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 9,
+            ..
+        } => ruby_2_5_9::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 0,
+            ..
+        } => ruby_2_6_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 1,
+            ..
+        } => ruby_2_6_1::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 2,
+            ..
+        } => ruby_2_6_2::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 3,
+            ..
+        } => ruby_2_6_3::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 4,
+            ..
+        } => ruby_2_6_4::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 5,
+            ..
+        } => ruby_2_6_5::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 6,
+            ..
+        } => ruby_2_6_6::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 7,
+            ..
+        } => ruby_2_6_7::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 8,
+            ..
+        } => ruby_2_6_8::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 9,
+            ..
+        } => ruby_2_6_9::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 10,
+            ..
+        } => ruby_2_6_10::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 0,
+            ..
+        } => ruby_2_7_0::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 1,
+            ..
+        } => ruby_2_7_1::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 2,
+            ..
+        } => ruby_2_7_2::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 3,
+            ..
+        } => ruby_2_7_3::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 4,
+            ..
+        } => ruby_2_7_4::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 5,
+            ..
+        } => ruby_2_7_5::is_maybe_thread,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 6,
+            ..
+        } => ruby_2_7_6::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 0,
+            ..
+        } => ruby_3_0_0::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 1,
+            ..
+        } => ruby_3_0_1::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 2,
+            ..
+        } => ruby_3_0_2::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 3,
+            ..
+        } => ruby_3_0_3::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 4,
+            ..
+        } => ruby_3_0_4::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 0,
+            ..
+        } => ruby_3_1_0::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 1,
+            ..
+        } => ruby_3_1_1::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 2,
+            ..
+        } => ruby_3_1_2::is_maybe_thread,
+        _ => panic!(
+            "Ruby version not supported yet: {}. Please create a GitHub issue and we'll fix it!",
+            version
+        ),
+    };
+    Box::new(function)
+}
+
+pub fn get_stack_trace_function(version: &Version) -> crate::core::types::StackTraceFn {
+    let stack_trace_function = match version {
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 1,
+            ..
+        } => ruby_1_9_1_0::get_stack_trace,
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 2,
+            ..
+        } => ruby_1_9_2_0::get_stack_trace,
+        Version {
+            major: 1,
+            minor: 9,
+            patch: 3,
+            ..
+        } => ruby_1_9_3_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 0,
+            patch: 0,
+            ..
+        } => ruby_2_0_0_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 0,
+            ..
+        } => ruby_2_1_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 1,
+            ..
+        } => ruby_2_1_1::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 2,
+            ..
+        } => ruby_2_1_2::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 3,
+            ..
+        } => ruby_2_1_3::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 4,
+            ..
+        } => ruby_2_1_4::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 5,
+            ..
+        } => ruby_2_1_5::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 6,
+            ..
+        } => ruby_2_1_6::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 7,
+            ..
+        } => ruby_2_1_7::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 8,
+            ..
+        } => ruby_2_1_8::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 9,
+            ..
+        } => ruby_2_1_9::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 1,
+            patch: 10,
+            ..
+        } => ruby_2_1_10::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 0,
+            ..
+        } => ruby_2_2_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 1,
+            ..
+        } => ruby_2_2_1::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 2,
+            ..
+        } => ruby_2_2_2::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 3,
+            ..
+        } => ruby_2_2_3::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 4,
+            ..
+        } => ruby_2_2_4::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 5,
+            ..
+        } => ruby_2_2_5::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 6,
+            ..
+        } => ruby_2_2_6::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 7,
+            ..
+        } => ruby_2_2_7::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 8,
+            ..
+        } => ruby_2_2_8::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 9,
+            ..
+        } => ruby_2_2_9::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 2,
+            patch: 10,
+            ..
+        } => ruby_2_2_10::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 0,
+            ..
+        } => ruby_2_3_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 1,
+            ..
+        } => ruby_2_3_1::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 2,
+            ..
+        } => ruby_2_3_2::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 3,
+            ..
+        } => ruby_2_3_3::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 4,
+            ..
+        } => ruby_2_3_4::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 5,
+            ..
+        } => ruby_2_3_5::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 6,
+            ..
+        } => ruby_2_3_6::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 7,
+            ..
+        } => ruby_2_3_7::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 3,
+            patch: 8,
+            ..
+        } => ruby_2_3_8::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 0,
+            ..
+        } => ruby_2_4_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 1,
+            ..
+        } => ruby_2_4_1::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 2,
+            ..
+        } => ruby_2_4_2::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 3,
+            ..
+        } => ruby_2_4_3::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 4,
+            ..
+        } => ruby_2_4_4::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 5,
+            ..
+        } => ruby_2_4_5::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 6,
+            ..
+        } => ruby_2_4_6::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 7,
+            ..
+        } => ruby_2_4_7::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 8,
+            ..
+        } => ruby_2_4_8::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 9,
+            ..
+        } => ruby_2_4_9::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 4,
+            patch: 10,
+            ..
+        } => ruby_2_4_10::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 0,
+            ..
+        } => ruby_2_5_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 1,
+            ..
+        } => ruby_2_5_1::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 2,
+            ..
+        } => ruby_2_5_2::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 3,
+            ..
+        } => ruby_2_5_3::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 4,
+            ..
+        } => ruby_2_5_4::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 5,
+            ..
+        } => ruby_2_5_5::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 6,
+            ..
+        } => ruby_2_5_6::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 7,
+            ..
+        } => ruby_2_5_7::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 8,
+            ..
+        } => ruby_2_5_8::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 5,
+            patch: 9,
+            ..
+        } => ruby_2_5_9::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 0,
+            ..
+        } => ruby_2_6_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 1,
+            ..
+        } => ruby_2_6_1::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 2,
+            ..
+        } => ruby_2_6_2::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 3,
+            ..
+        } => ruby_2_6_3::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 4,
+            ..
+        } => ruby_2_6_4::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 5,
+            ..
+        } => ruby_2_6_5::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 6,
+            ..
+        } => ruby_2_6_6::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 7,
+            ..
+        } => ruby_2_6_7::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 8,
+            ..
+        } => ruby_2_6_8::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 9,
+            ..
+        } => ruby_2_6_9::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 10,
+            ..
+        } => ruby_2_6_10::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 0,
+            ..
+        } => ruby_2_7_0::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 1,
+            ..
+        } => ruby_2_7_1::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 2,
+            ..
+        } => ruby_2_7_2::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 3,
+            ..
+        } => ruby_2_7_3::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 4,
+            ..
+        } => ruby_2_7_4::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 5,
+            ..
+        } => ruby_2_7_5::get_stack_trace,
+        Version {
+            major: 2,
+            minor: 7,
+            patch: 6,
+            ..
+        } => ruby_2_7_6::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 0,
+            ..
+        } => ruby_3_0_0::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 1,
+            ..
+        } => ruby_3_0_1::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 2,
+            ..
+        } => ruby_3_0_2::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 3,
+            ..
+        } => ruby_3_0_3::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 0,
+            patch: 4,
+            ..
+        } => ruby_3_0_4::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 0,
+            ..
+        } => ruby_3_1_0::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 1,
+            ..
+        } => ruby_3_1_1::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 1,
+            patch: 2,
+            ..
+        } => ruby_3_1_2::get_stack_trace,
+        _ => panic!(
+            "Ruby version not supported yet: {}. Please create a GitHub issue and we'll fix it!",
+            version
+        ),
+    };
+    Box::new(stack_trace_function)
+}
 
 #[cfg(not(debug_assertions))]
 #[cfg(test)]

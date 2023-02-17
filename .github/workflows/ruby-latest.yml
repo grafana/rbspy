@@ -6,7 +6,7 @@ on:
 jobs:
   ruby-latest:
     name: Test rbspy with upstream Ruby's main branch
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
       MAKEFLAGS: -j4
@@ -44,7 +44,7 @@ jobs:
         with:
           path: rbspy
       - name: Cargo Cache
-        uses: actions/cache@v2.1.7
+        uses: actions/cache@v3
         with:
           path: |
             ~/.cargo/registry

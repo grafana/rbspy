@@ -13,10 +13,10 @@ on:
 jobs:
   format:
     name: Check code formatting
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Rust
         uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
         with:
@@ -33,7 +33,7 @@ jobs:
     env:
       CARGO: cargo
       TARGET_FLAGS: --target ${{ matrix.target }}
-      RUST_BACKTRACE: 1
+      RUST_BACKTRACE: full
     timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
@@ -46,17 +46,17 @@ jobs:
           - windows
         include:
           - build: linux-x86_64
-            os: ubuntu-20.04
+            os: ubuntu-22.04
             ruby-version: 3.1.2
             run-tests: 'true'
             target: x86_64-unknown-linux-gnu
           - build: linux-aarch64
-            os: ubuntu-20.04
+            os: ubuntu-22.04
             ruby-version: 3.1.2
             run-tests: 'false'
             target: aarch64-unknown-linux-gnu
           - build: macos
-            os: macos-10.15
+            os: macos-12
             ruby-version: 3.1.2
             run-tests: 'true'
             target: x86_64-apple-darwin
@@ -67,7 +67,7 @@ jobs:
             target: x86_64-pc-windows-msvc
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Ruby
         uses: ruby/setup-ruby@v1
         with:
@@ -86,14 +86,14 @@ jobs:
         run: |
           sudo apt update -qq && sudo apt install -qq -y gcc-aarch64-linux-gnu
       - name: Cargo Cache
-        uses: actions/cache@v2.1.7
+        uses: actions/cache@v3.0.4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo0-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-20221101-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo0-
+            ${{ runner.os }}-${{ matrix.target }}-cargo-20221101
       - name: Show command used for Cargo
         run: |
           echo "cargo command is: ${{ env.CARGO }}"
@@ -113,13 +113,13 @@ jobs:
 
       - name: Upload Linux and macOS Binaries
         if: runner.os != 'windows'
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: rbspy-${{ matrix.target }}
           path: rbspy-${{ matrix.target }}
       - name: Upload Windows Binaries
         if: runner.os == 'windows'
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: rbspy-${{ matrix.target }}.exe
           path: rbspy-${{ matrix.target }}.exe
@@ -145,7 +145,7 @@ jobs:
           target/${{ matrix.target }}/release/rbspy record env LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4 ruby ci/ruby-programs/short_program.rb
 
   build-linux-cross:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -156,9 +156,9 @@ jobs:
         RUSTUP_HOME: /root/.rustup
         CARGO_HOME: /root/.cargo
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Cargo Cache
-        uses: actions/cache@v2.1.7
+        uses: actions/cache@v3.0.4
         with:
           path: |
             ~/.cargo/registry
@@ -173,67 +173,72 @@ jobs:
         run: |
           cp target/*/release/rbspy rbspy-${{ matrix.target }}
       - name: Upload Binaries
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: rbspy-${{ matrix.target }}
           path: rbspy-${{ matrix.target }}
 
   build-freebsd:
     name: Build, test, and upload binaries (freebsd-x86_64)
-    runs-on: macos-10.15
-    timeout-minutes: 30
+    runs-on: macos-12
+    timeout-minutes: 45
     strategy:
       matrix:
-        box:
-          - fbsd_12_2
+        include:
+          - box: fbsd_13_1
+            release: FreeBSD-13.1-STABLE
+            url: https://github.com/rbspy/freebsd-vagrant-box/releases/download/20220703/fbsd_13_1.box
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Cache Vagrant box
-        uses: actions/cache@v2.1.7
+        uses: actions/cache@v3.0.4
         with:
           path: ~/.vagrant.d
-          key: ${{ matrix.box }}-vagrant-boxes-20220607-0-${{ hashFiles('ci/Vagrantfile') }}
+          key: ${{ matrix.box }}-vagrant-boxes-${{ hashFiles('ci/Vagrantfile') }}
           restore-keys: |
-            ${{ matrix.box }}-vagrant-boxes-20220607-0-
+            ${{ matrix.box }}-vagrant-boxes-
       - name: Cache Cargo and build artifacts
-        uses: actions/cache@v2.1.7
+        uses: actions/cache@v3.0.4
         with:
           path: build-artifacts.tar
-          key: ${{ matrix.box }}-cargo-20220607-0-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.box }}-cargo-20221101-0-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ matrix.box }}-cargo-20220607-0-
       - name: Set up VM
         run: |
+          brew install vagrant
+          vagrant plugin install vagrant-vbguest
+          vagrant plugin install vagrant-scp
+
           ln -sf ci/Vagrantfile Vagrantfile
 
-          if [ ! -d ~/.vagrant.d/boxes/rbspy-VAGRANTSLASH-FreeBSD-12.2-STABLE ]; then
-            vagrant box add rbspy/FreeBSD-12.2-STABLE https://github.com/rbspy/freebsd-vagrant-box/releases/download/20220115-2/fbsd_12_2.box
+          if [ ! -d ~/.vagrant.d/boxes/rbspy-VAGRANTSLASH-${{ matrix.release }} ]; then
+            vagrant box add --no-tty rbspy/${{ matrix.release }} ${{ matrix.url }}
           fi
           vagrant up ${{ matrix.box }}
       - name: Build and test
         run: vagrant ssh ${{ matrix.box }} -- bash /vagrant/ci/freebsd-build.sh
       - name: Retrieve build artifacts for caching purposes
         run: |
-          vagrant ssh-config --host "default" > config.txt
-          scp -F config.txt default:/vagrant/build-artifacts.tar .
+          vagrant scp ${{ matrix.box }}:/vagrant/build-artifacts.tar build-artifacts.tar
           ls -ahl build-artifacts.tar
       - name: Prepare binary for upload
         run: |
           tar xf build-artifacts.tar  target/release/rbspy
           mv target/release/rbspy rbspy-x86_64-unknown-freebsd
       - name: Upload Binaries
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: rbspy-x86_64-unknown-freebsd
           path: rbspy-x86_64-unknown-freebsd
 
   release:
     name: Create draft release
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     if: "startsWith(github.ref, 'refs/tags/')"
     needs: [build, build-freebsd, build-linux-cross]
     steps:
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v3
         with:
           path: raw-artifacts
       - name: Prepare binary archives

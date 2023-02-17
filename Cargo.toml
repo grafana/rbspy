@@ -1,6 +1,6 @@
 [package]
 name = "rbspy"
-version = "0.12.1"
+version = "0.13.1"
 authors = ["Adam Jensen <acjensen@gmail.com>", "Julia Evans <julia@jvns.ca>"]
 description = "Sampling CPU profiler for Ruby"
 keywords = ["ruby", "profiler", "MRI"]
@@ -20,34 +20,38 @@ members = [
 ]
 
 [dependencies]
-anyhow = "1.0.40"
+anyhow = "1.0.58"
 chrono = "0.4.19"
 clap = "3.1.6"
 ctrlc = "3.1.0"
 directories = "4.0.1"
-elf = "0.0.10"
 env_logger = "0.9.0"
 inferno = "0.11.1"
 flate2 = "1.0.20"
+goblin = "0.6.0"
+lazy_static = "1.4"
 libc = "0.2.34"
 log = "0.4.6"
-proc-maps = "0.2.0"
-prost = "0.10.0"
+memmap2 = "0.5"
+proc-maps = "0.3.0"
+prost = "0.11.0"
 rand = "0.8.3"
-rbspy-ruby-structs = { path = "ruby-structs", version="0.12.1" }
+rbspy-ruby-structs = { path = "ruby-structs", version="0.13.1" }
 remoteprocess = "0.4.5"
+semver = "1.0.10"
 serde = "1.0.131"
 serde_derive = "1.0.131"
 serde_json = "1.0.72"
+spytools = "0.1.3"
 term_size = "0.3.2"
 tempdir = "0.3.7"
 thiserror = "1.0.24"
 
 [target.'cfg(unix)'.dependencies]
-nix = "0.23.0"
+nix = "0.25.0"
 
 [target.'cfg(target_os="macos")'.dependencies]
-libproc = "0.10.0"
+libproc = "0.12.0"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3.9", features = ["timeapi", "wow64apiset"] }

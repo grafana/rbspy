@@ -16,11 +16,11 @@ jobs:
           - linux
         include:
           - build: linux
-            os: ubuntu-20.04
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -36,13 +36,13 @@ jobs:
           echo "Test binary path is $test_binary_path"
           cp $test_binary_path rbspy-test
       - name: Upload binaries
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: rbspy-test
           path: rbspy-test
 
   ruby-version-tests:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build-ruby-version-tests]
     strategy:
       fail-fast: false
@@ -60,7 +60,7 @@ jobs:
         ]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -71,7 +71,7 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby_version }}
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v3
       - name: Run tests
         timeout-minutes: 5
         run: |
