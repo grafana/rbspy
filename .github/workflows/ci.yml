@@ -18,12 +18,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
       - name: Install Rust
-        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
-        with:
-          toolchain: stable
-          override: true
-          profile: minimal
-          components: rustfmt
+        uses: dtolnay/rust-toolchain@984d158d699777abbaa79de23de3134e60c187fa # stable branch
       - name: Run cargo fmt
         run: |
           cargo fmt --all -- --check
@@ -73,11 +68,7 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby-version }}
       - name: Install Rust
-        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
+        uses: dtolnay/rust-toolchain@984d158d699777abbaa79de23de3134e60c187fa # stable branch
       - name: Install Rust toolchain target
         run: |
           rustup target add ${{ matrix.target }}
@@ -100,7 +91,7 @@ jobs:
           echo "target flag is: ${{ env.TARGET_FLAGS }}"
 
       - name: Build rbspy
-        run: ${{ env.CARGO }} build --release --locked --verbose --workspace --all-targets ${{ env.TARGET_FLAGS }}
+        run: ${{ env.CARGO }} build --release --locked --workspace --all-targets ${{ env.TARGET_FLAGS }}
 
       - name: Prepare binary for upload
         if: runner.os != 'windows'
@@ -126,15 +117,15 @@ jobs:
 
       - name: Run tests
         timeout-minutes: 5
-        run: ${{ env.CARGO }} test --release --verbose ${{ env.TARGET_FLAGS }}
+        run: ${{ env.CARGO }} test --release ${{ env.TARGET_FLAGS }}
         if: runner.os == 'linux' && matrix.run-tests == 'true'
       - name: Run tests
         timeout-minutes: 5
-        run: sudo "PATH=$PATH" ${{ env.CARGO }} test --release --verbose ${{ env.TARGET_FLAGS }}
+        run: sudo "PATH=$PATH" ${{ env.CARGO }} test --release ${{ env.TARGET_FLAGS }}
         if: runner.os == 'macOS' && matrix.run-tests == 'true'
       - name: Run tests
         timeout-minutes: 5
-        run: ${{ env.CARGO }} test --release --verbose ${{ env.TARGET_FLAGS }} -- --skip sampler::tests
+        run: ${{ env.CARGO }} test --release ${{ env.TARGET_FLAGS }} -- --skip sampler::tests
         if: runner.os == 'windows' && matrix.run-tests == 'true'
       - name: Run rbspy with alternative mallocs
         if: runner.os == 'linux' && matrix.run-tests == 'true'
@@ -187,23 +178,23 @@ jobs:
         include:
           - box: fbsd_13_1
             release: FreeBSD-13.1-STABLE
-            url: https://github.com/rbspy/freebsd-vagrant-box/releases/download/20220703/fbsd_13_1.box
+            url: https://github.com/rbspy/freebsd-vagrant-box/releases/download/20221112/fbsd_13_1.box
     steps:
       - uses: actions/checkout@v3
       - name: Cache Vagrant box
         uses: actions/cache@v3.0.4
         with:
           path: ~/.vagrant.d
-          key: ${{ matrix.box }}-vagrant-boxes-${{ hashFiles('ci/Vagrantfile') }}
+          key: ${{ matrix.box }}-vagrant-boxes-20221112-${{ hashFiles('ci/Vagrantfile') }}
           restore-keys: |
-            ${{ matrix.box }}-vagrant-boxes-
+            ${{ matrix.box }}-vagrant-boxes-20221112-
       - name: Cache Cargo and build artifacts
         uses: actions/cache@v3.0.4
         with:
           path: build-artifacts.tar
-          key: ${{ matrix.box }}-cargo-20221101-0-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.box }}-cargo-20221112-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ matrix.box }}-cargo-20220607-0-
+            ${{ matrix.box }}-cargo-20221112-
       - name: Set up VM
         run: |
           brew install vagrant
@@ -224,7 +215,7 @@ jobs:
           ls -ahl build-artifacts.tar
       - name: Prepare binary for upload
         run: |
-          tar xf build-artifacts.tar  target/release/rbspy
+          tar xf build-artifacts.tar target/release/rbspy
           mv target/release/rbspy rbspy-x86_64-unknown-freebsd
       - name: Upload Binaries
         uses: actions/upload-artifact@v3
