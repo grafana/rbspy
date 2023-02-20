@@ -71,12 +71,12 @@ mod tests {
     use std::io::Cursor;
 
     // Build a test stackframe
-    fn f(i: u32) -> StackFrame {
+    fn f(i: usize) -> StackFrame {
         StackFrame {
             name: format!("func{}", i),
             relative_path: format!("file{}.rb", i),
             absolute_path: None,
-            lineno: i,
+            lineno: Some(i),
         }
     }
 

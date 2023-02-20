@@ -43,7 +43,11 @@ impl Stats {
     }
 
     fn name_function(frame: &StackFrame) -> String {
-        format!("{} - {}", frame.name, frame.relative_path)
+        let lineno = match frame.lineno {
+            Some(lineno) => format!(":{}", lineno),
+            None => "".to_string(),
+        };
+        format!("{} - {}{}", frame.name, frame.relative_path, lineno)
     }
 
     fn name_lineno(frame: &StackFrame) -> String {
@@ -134,12 +138,12 @@ mod tests {
     use crate::ui::summary::*;
 
     // Build a test stackframe
-    fn f(i: u32) -> StackFrame {
+    fn f(i: usize) -> StackFrame {
         StackFrame {
             name: format!("func{}", i),
             relative_path: format!("file{}.rb", i),
             absolute_path: None,
-            lineno: i,
+            lineno: Some(i),
         }
     }
 
@@ -154,13 +158,13 @@ mod tests {
         stats.add_function_name(&vec![f(2), f(3), f(1)]);
 
         let expected = "% self  % total  name
- 40.00    60.00  func3 - file3.rb
- 40.00    60.00  func2 - file2.rb
- 20.00   100.00  func1 - file1.rb
+ 40.00    60.00  func3 - file3.rb:3
+ 40.00    60.00  func2 - file2.rb:2
+ 20.00   100.00  func1 - file1.rb:1
 ";
 
         let mut buf: Vec<u8> = Vec::new();
-        stats.write(&mut buf).expect("Callgrind write failed");
+        stats.write(&mut buf).expect("summary write failed");
         let actual = String::from_utf8(buf).expect("summary output not utf8");
         assert_eq!(actual, expected, "Unexpected summary output");
     }

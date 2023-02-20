@@ -24,7 +24,7 @@ pub struct StackFrame {
     pub name: String,
     pub relative_path: String,
     pub absolute_path: Option<String>,
-    pub lineno: u32,
+    pub lineno: Option<usize>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
@@ -73,14 +73,18 @@ impl StackFrame {
             name: "(unknown) [c function]".to_string(),
             relative_path: "(unknown)".to_string(),
             absolute_path: None,
-            lineno: 0,
+            lineno: None,
         }
     }
 }
 
 impl fmt::Display for StackFrame {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} - {}:{}", self.name, self.path(), self.lineno)
+        let lineno = match self.lineno {
+            Some(lineno) => format!(":{}", lineno.to_string()),
+            None => "".to_string(),
+        };
+        write!(f, "{} - {}{}", self.name, self.path(), lineno)
     }
 }
 

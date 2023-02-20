@@ -91,7 +91,7 @@ impl Stats {
     fn new_location(&mut self, id: u64, frame: &StackFrame) -> Location {
         let new_line = Line {
             function_id: self.get_or_create_function_id(frame),
-            line: frame.lineno as i64,
+            line: frame.lineno.unwrap_or(0) as i64,
         };
         Location {
             id,
@@ -190,12 +190,12 @@ mod test {
     }
 
     // Build a test stackframe
-    fn f(i: u32) -> StackFrame {
+    fn f(i: usize) -> StackFrame {
         StackFrame {
             name: format!("func{}", i),
             relative_path: format!("file{}.rb", i),
             absolute_path: None,
-            lineno: i,
+            lineno: Some(i),
         }
     }
 
@@ -205,7 +205,7 @@ mod test {
             name: "funcX".to_owned(),
             relative_path: "file1.rb".to_owned(),
             absolute_path: None,
-            lineno: 42,
+            lineno: Some(42),
         }
     }
 

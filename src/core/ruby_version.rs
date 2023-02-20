@@ -21,7 +21,7 @@ macro_rules! ruby_version_v_1_9_1(
             get_stack_trace!(rb_thread_struct);
             get_execution_context_from_thread!(rb_thread_struct);
             rstring_as_array_1_9_1!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_cfps!();
             get_pos!(rb_iseq_struct);
             get_lineno_1_9_0!();
@@ -46,7 +46,7 @@ macro_rules! ruby_version_v_1_9_2_to_3(
             get_stack_trace!(rb_thread_struct);
             get_execution_context_from_thread!(rb_thread_struct);
             rstring_as_array_1_9_1!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_cfps!();
             get_pos!(rb_iseq_struct);
             get_lineno_1_9_0!();
@@ -82,7 +82,7 @@ macro_rules! ruby_version_v_2_0_to_2_2(
             get_stack_trace!(rb_thread_struct);
             get_execution_context_from_thread!(rb_thread_struct);
             rstring_as_array_1_9_1!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_cfps!();
             get_pos!(rb_iseq_struct);
             get_lineno_2_0_0!();
@@ -106,7 +106,7 @@ macro_rules! ruby_version_v_2_3_to_2_4(
             get_stack_trace!(rb_thread_struct);
             get_execution_context_from_thread!(rb_thread_struct);
             rstring_as_array_1_9_1!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
             get_lineno_2_3_0!();
@@ -130,7 +130,7 @@ macro_rules! ruby_version_v2_5_x(
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_thread!(rb_execution_context_struct);
             rstring_as_array_1_9_1!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
             get_lineno_2_5_0!();
@@ -158,7 +158,7 @@ macro_rules! ruby_version_v2_6_x(
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_thread!(rb_execution_context_struct);
             rstring_as_array_1_9_1!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_ruby_string_array_2_5_0!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
@@ -186,7 +186,7 @@ macro_rules! ruby_version_v2_7_x(
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_thread!(rb_execution_context_struct);
             rstring_as_array_1_9_1!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_ruby_string_array_2_5_0!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
@@ -211,7 +211,7 @@ macro_rules! ruby_version_v3_0_x(
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_vm!();
             rstring_as_array_1_9_1!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_ruby_string_array_2_5_0!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
@@ -239,7 +239,7 @@ macro_rules! ruby_version_v3_1_x(
             get_stack_trace!(rb_execution_context_struct);
             get_execution_context_from_vm!();
             rstring_as_array_3_1_0!();
-            get_ruby_string!();
+            get_ruby_string_1_9_1!();
             get_ruby_string_array_2_5_0!();
             get_cfps!();
             get_pos!(rb_iseq_constant_body);
@@ -248,6 +248,33 @@ macro_rules! ruby_version_v3_1_x(
             stack_field_2_5_0!();
             get_thread_status_2_6_0!();
             get_thread_id_2_5_0!();
+            get_cfunc_name!();
+
+            #[allow(non_upper_case_globals)]
+            const ruby_fl_type_RUBY_FL_USHIFT: ruby_fl_type = ruby_fl_ushift_RUBY_FL_USHIFT as i32;
+        }
+    )
+);
+
+macro_rules! ruby_version_v3_2_x(
+    ($ruby_version:ident) => (
+        pub mod $ruby_version {
+            use std;
+            use anyhow::{Context, format_err, Result};
+            use bindings::$ruby_version::*;
+            use crate::core::process::ProcessMemory;
+
+            get_stack_trace!(rb_execution_context_struct);
+            get_execution_context_from_vm!();
+            get_ruby_string_3_2_0!();
+            get_ruby_string_array_3_2_0!();
+            get_cfps!();
+            get_pos!(rb_iseq_constant_body);
+            get_lineno_2_6_0!();
+            get_stack_frame_2_5_0!();
+            stack_field_2_5_0!();
+            get_thread_status_2_6_0!();
+            get_thread_id_3_2_0!();
             get_cfunc_name!();
 
             #[allow(non_upper_case_globals)]
@@ -301,12 +328,13 @@ macro_rules! get_execution_context_from_vm(
             .iter()
             .enumerate()
             .filter(|(_, &addr)| addr == vm.ractor.main_thread as usize)
-            .map(|(i, _)| candidate_addresses[i - 1])
+            .map(|(idx, _)| candidate_addresses[idx - 1])
             .filter(|&addr| addr != 0)
             .filter(|&addr| source.copy_struct::<rb_execution_context_struct>(addr as usize).is_ok())
             .collect::<Vec<usize>>()
-            .pop()
-            .ok_or(format_err!("couldn't find main thread execution context"))
+            .first()
+            .map(|&addr| addr as usize)
+            .ok_or_else(|| format_err!("couldn't find execution context"))
         }
     )
 );
@@ -337,13 +365,17 @@ macro_rules! get_stack_trace(
                 return Ok(None);
             }
 
-            let thread_id = get_thread_id(&thread, source)?;
-
             if stack_field(&thread) as usize == 0 {
                 return Ok(Some(StackTrace {
                     pid: Some(pid),
                     trace: vec!(StackFrame::unknown_c_function()),
-                    thread_id: Some(thread_id),
+                    thread_id: match get_thread_id(&thread, source) {
+                        Ok(tid) => Some(tid),
+                        Err(e) => {
+                            debug!("Couldn't get thread ID: {}", e);
+                            None
+                        },
+                    },
                     time: Some(SystemTime::now())
                 }));
             }
@@ -360,7 +392,7 @@ macro_rules! get_stack_trace(
                                     name: format!("{} [c function]", name),
                                     relative_path: "(unknown)".to_string(),
                                     absolute_path: None,
-                                    lineno: 0
+                                    lineno: None,
                                 };
                             },
                             Err(e) => {
@@ -395,8 +427,14 @@ macro_rules! get_stack_trace(
                     }
                 }
             }
-
-            Ok(Some(StackTrace{trace, pid: Some(pid), thread_id: Some(thread_id), time: Some(SystemTime::now())}))
+            let thread_id = match get_thread_id(&thread, source) {
+                Ok(tid) => Some(tid),
+                Err(e) => {
+                    debug!("Couldn't get thread ID: {}", e);
+                    None
+                },
+            };
+            Ok(Some(StackTrace{trace, pid: Some(pid), thread_id, time: Some(SystemTime::now())}))
         }
 
         use proc_maps::{maps_contain_addr, MapRange};
@@ -517,8 +555,24 @@ macro_rules! get_thread_id_2_5_0(
         fn get_thread_id<T>(thread_struct: &rb_execution_context_struct, source: &T)
                             -> Result<usize> where T: ProcessMemory {
             let thread: rb_thread_struct = source.copy_struct(thread_struct.thread_ptr as usize)
-                .context(thread_struct.thread_ptr as usize)?;
+                .context("couldn't copy thread struct")?;
             Ok(thread.thread_id as usize)
+        }
+    )
+);
+
+macro_rules! get_thread_id_3_2_0(
+    () => (
+        fn get_thread_id<T>(thread_struct: &rb_execution_context_struct, source: &T)
+                            -> Result<usize> where T: ProcessMemory {
+            let thread: rb_thread_struct = source.copy_struct(thread_struct.thread_ptr as usize)
+                .context("couldn't copy thread struct")?;
+            if thread.nt.is_null() {
+                return Err(format_err!("native thread pointer is NULL"));
+            }
+            let native_thread: rb_native_thread = source.copy_struct(thread.nt as usize)
+                .context("couldn't copy native thread struct")?;
+            Ok(native_thread.thread_id as usize)
         }
     )
 );
@@ -528,20 +582,61 @@ macro_rules! get_ruby_string_array_2_5_0(
         // Returns (path, absolute_path)
         fn get_ruby_string_array<T>(addr: usize, string_class: usize, source: &T) -> Result<(String, String)> where T: ProcessMemory {
             // todo: we're doing an extra copy here for no reason
-            let rstring: RString = source.copy_struct(addr)
-                .context(addr)?;
+            let rstring: RString = source.copy_struct(addr).context("couldn't copy RString")?;
             if rstring.basic.klass as usize == string_class {
                 let s = get_ruby_string(addr, source)?;
                 return Ok((s.clone(), s))
             }
             // otherwise it's an RArray
-            let rarray: RArray = source.copy_struct(addr)
-                .context(addr)?;
+            let rarray: RArray = source.copy_struct(addr).context("couldn't copy RArray")?;
             // TODO: this assumes that the array contents are stored inline and not on the heap
             // I think this will always be true but we should check instead
             // the reason I am not checking is that I don't know how to check yet
-            let path_addr: usize = unsafe { rarray.as_.ary[0] as usize }; // 1 means get the absolute path, not the relative path
-            let abs_path_addr: usize = unsafe { rarray.as_.ary[1] as usize }; // 1 means get the absolute path, not the relative path
+            let path_addr: usize = unsafe { rarray.as_.ary[0] as usize }; // 0 => relative path
+            let abs_path_addr: usize = unsafe { rarray.as_.ary[1] as usize }; // 1 => absolute path
+            let rel_path = get_ruby_string(path_addr, source)?;
+            // In the case of internal ruby functions (and maybe others), we may not get a valid
+            // pointer here
+            let abs_path = get_ruby_string(abs_path_addr, source)
+                .unwrap_or(String::from("unknown"));
+            Ok((rel_path, abs_path))
+        }
+    )
+);
+
+macro_rules! get_ruby_string_array_3_2_0(
+    () => (
+        // Returns (path, absolute_path)
+        fn get_ruby_string_array<T>(addr: usize, string_class: usize, source: &T) -> Result<(String, String)> where T: ProcessMemory {
+            let rstring: RString = source.copy_struct(addr).context("couldn't copy RString")?;
+            if rstring.basic.klass as usize == string_class {
+                let s = get_ruby_string(addr, source)?;
+                return Ok((s.clone(), s))
+            }
+
+            // Due to VWA in ruby 3.2, we can't get the exact length of the RArray. So,
+            // we use these inline structs and assume that there are at least two array
+            // elements when we're reading a pathobj.
+            #[repr(C)]
+            #[derive(Copy, Clone)]
+            struct PaddedRArray {
+                pub basic: RBasic,
+                pub as_: PaddedRArray__bindgen_ty_1,
+            }
+            #[repr(C)]
+            #[derive(Copy, Clone)]
+            union PaddedRArray__bindgen_ty_1 {
+                pub heap: RArray__bindgen_ty_1__bindgen_ty_1,
+                pub ary: [VALUE; 2usize],
+            }
+
+            // otherwise it's an RArray
+            let rarray: PaddedRArray = source.copy_struct(addr).context("couldn't copy RArray")?;
+            // TODO: this assumes that the array contents are stored inline and not on the heap
+            // I think this will always be true but we should check instead
+            // the reason I am not checking is that I don't know how to check yet
+            let path_addr: usize = unsafe { rarray.as_.ary[0] as usize }; // 0 => relative path
+            let abs_path_addr: usize = unsafe { rarray.as_.ary[1] as usize }; // 1 => absolute path
             let rel_path = get_ruby_string(path_addr, source)?;
             // In the case of internal ruby functions (and maybe others), we may not get a valid
             // pointer here
@@ -568,43 +663,62 @@ macro_rules! rstring_as_array_3_1_0(
     )
 );
 
-macro_rules! get_ruby_string(
+macro_rules! get_ruby_string_1_9_1(
     () => (
-        use std::ffi::CStr;
-
         fn get_ruby_string<T>(
             addr: usize,
             source: &T
         ) -> Result<String> where T: ProcessMemory {
             let vec = {
-                let rstring: RString = source.copy_struct(addr)
-                    .context(addr)?;
-                let basic = rstring.basic;
-                let is_array = basic.flags & 1 << 13 == 0;
-                if is_array {
-                    unsafe { CStr::from_ptr(rstring_as_array(rstring).as_ref().as_ptr() as *const libc::c_char) }
+                let rstring: RString = source.copy_struct(addr).context("couldn't copy rstring")?;
+                // See RSTRING_NOEMBED and RUBY_FL_USER1
+                let is_embedded_string = rstring.basic.flags & 1 << 13 == 0;
+                if is_embedded_string {
+                    unsafe { std::ffi::CStr::from_ptr(rstring_as_array(rstring).as_ref().as_ptr()) }
                     .to_bytes()
                     .to_vec()
                 } else {
                     unsafe {
                         let addr = rstring.as_.heap.ptr as usize;
                         let len = rstring.as_.heap.len as usize;
-                        let result = source.copy(addr as usize, len);
-                        match result {
-                            Err(x) => {
-                                debug!("Error: Failed to get ruby string.\nrstring: {:?}, addr: {}, len: {}", rstring, addr, len);
-                                return Err(x).context(addr)?;
-                            }
-                            Ok(x) => x
-                        }
+                        source.copy(addr as usize, len).context("couldn't copy ruby string from heap")?
                     }
                 }
             };
 
-            let error =
-                crate::core::types::MemoryCopyError::Message("Ruby string is invalid".to_string());
+            String::from_utf8(vec).context("couldn't convert ruby string bytes to string")
+        }
+    )
+);
 
-            String::from_utf8(vec).or(Err(error.into()))
+macro_rules! get_ruby_string_3_2_0(
+    () => (
+        fn get_ruby_string<T>(
+            addr: usize,
+            source: &T
+        ) -> Result<String> where T: ProcessMemory {
+            let rstring: RString = source.copy_struct(addr).context("couldn't copy rstring")?;
+            // See RSTRING_NOEMBED and RUBY_FL_USER1
+            let is_embedded_string = rstring.basic.flags & 1 << 13 == 0;
+            if is_embedded_string {
+                // The introduction of Variable Width Allocation (VWA) for strings means that
+                // the length of embedded strings varies at runtime. Instead of assuming a
+                // constant length, we need to read the length from the struct.
+                //
+                // See https://bugs.ruby-lang.org/issues/18239
+                let embedded_str_bytes = source.copy(
+                    addr + std::mem::size_of::<RBasic>() + std::mem::size_of::<std::os::raw::c_long>(),
+                    unsafe { rstring.as_.embed.len } as usize
+                ).context("couldn't copy rstring")?;
+                return String::from_utf8(embedded_str_bytes).context("couldn't convert ruby string bytes to string")
+            } else {
+                unsafe {
+                    let addr = rstring.as_.heap.ptr as usize;
+                    let len = rstring.as_.heap.len as usize;
+                    let heap_str_bytes = source.copy(addr as usize, len).context("couldn't copy ruby string from heap")?;
+                    return String::from_utf8(heap_str_bytes).context("couldn't convert ruby string bytes to string");
+                }
+            }
         }
     )
 );
@@ -620,7 +734,13 @@ macro_rules! get_stack_frame_1_9_1(
                 name: get_ruby_string(iseq_struct.name as usize, source)?,
                 relative_path: get_ruby_string(iseq_struct.filename as usize, source)?,
                 absolute_path: None,
-                lineno: get_lineno(iseq_struct, cfp, source)?,
+                lineno: match get_lineno(iseq_struct, cfp, source) {
+                    Ok(lineno) => Some(lineno),
+                    Err(e) => {
+                        warn!("couldn't get lineno: {}", e);
+                        None
+                    },
+                }
             })
         }
     )
@@ -637,101 +757,91 @@ macro_rules! get_stack_frame_1_9_2(
                 name: get_ruby_string(iseq_struct.name as usize, source)?,
                 relative_path: get_ruby_string(iseq_struct.filename as usize, source)?,
                 absolute_path: Some(get_ruby_string(iseq_struct.filepath as usize, source)?),
-                lineno: get_lineno(iseq_struct, cfp, source)?,
+                lineno: match get_lineno(iseq_struct, cfp, source) {
+                    Ok(lineno) => Some(lineno),
+                    Err(e) => {
+                        warn!("couldn't get lineno: {}", e);
+                        None
+                    },
+                }
             })
         }
     )
 );
 
-macro_rules! get_lineno_1_9_0(
+macro_rules! get_stack_frame_2_0_0(
     () => (
-        fn get_lineno<T>(
+        fn get_stack_frame<T>(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32> where T: ProcessMemory {
-            let pos = get_pos(iseq_struct, cfp)?;
-            let t_size = iseq_struct.insn_info_size as usize;
-            if t_size == 0 {
-                Ok(0) //TODO: really?
-            } else if t_size == 1 {
-                let table: [iseq_insn_info_entry; 1] = source.copy_struct(iseq_struct.insn_info_table as usize)
-                    .context(iseq_struct.insn_info_table as usize)?;
-                Ok(table[0].line_no as u32)
-            } else {
-                let table: Vec<iseq_insn_info_entry> = source.copy_vec(iseq_struct.insn_info_table as usize, t_size as usize)
-                    .context(iseq_struct.insn_info_table as usize)?;
-                for i in 0..t_size {
-                    if pos == table[i].position as usize {
-                        return Ok(table[i].line_no as u32)
-                    } else if table[i].position as usize > pos {
-                        return Ok(table[i-1].line_no as u32)
-                    }
+        ) -> Result<StackFrame> where T: ProcessMemory {
+            Ok(StackFrame{
+                name: get_ruby_string(iseq_struct.location.label as usize, source)?,
+                relative_path: get_ruby_string(iseq_struct.location.path as usize, source)?,
+                absolute_path: Some(get_ruby_string(iseq_struct.location.absolute_path as usize, source)?),
+                lineno: match get_lineno(iseq_struct, cfp, source) {
+                    Ok(lineno) => Some(lineno),
+                    Err(e) => {
+                        warn!("couldn't get lineno: {}", e);
+                        None
+                    },
                 }
-                Ok(table[t_size-1].line_no as u32)
-            }
+            })
         }
     )
 );
 
-macro_rules! get_lineno_2_0_0(
+macro_rules! get_stack_frame_2_3_0(
     () => (
-        fn get_lineno<T>(
+        fn get_stack_frame<T>(
             iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32> where T: ProcessMemory {
-            let pos = get_pos(iseq_struct, cfp)?;
-            let t_size = iseq_struct.line_info_size as usize;
-            if t_size == 0 {
-                Ok(0) //TODO: really?
-            } else if t_size == 1 {
-                let table: [iseq_line_info_entry; 1] = source.copy_struct(iseq_struct.line_info_table as usize)
-                    .context(iseq_struct.line_info_table as usize)?;
-                Ok(table[0].line_no)
-            } else {
-                let table: Vec<iseq_line_info_entry> = source.copy_vec(iseq_struct.line_info_table as usize, t_size as usize)
-                    .context(iseq_struct.line_info_table as usize)?;
-                for i in 0..t_size {
-                    if pos == table[i].position as usize {
-                        return Ok(table[i].line_no)
-                    } else if table[i].position as usize > pos {
-                        return Ok(table[i-1].line_no)
-                    }
+        ) -> Result<StackFrame> where T: ProcessMemory {
+            let body: rb_iseq_constant_body = source.copy_struct(iseq_struct.body as usize)
+                .context(iseq_struct.body as usize)?;
+            Ok(StackFrame{
+                name: get_ruby_string(body.location.label as usize, source)?,
+                relative_path: get_ruby_string(body.location.path as usize, source)?,
+                absolute_path: Some(get_ruby_string(body.location.absolute_path as usize, source)?),
+                lineno: match get_lineno(&body, cfp, source) {
+                    Ok(lineno) => Some(lineno),
+                    Err(e) => {
+                        warn!("couldn't get lineno: {}", e);
+                        None
+                    },
                 }
-                Ok(table[t_size-1].line_no)
-            }
+            })
         }
     )
 );
 
-macro_rules! get_lineno_2_3_0(
+macro_rules! get_stack_frame_2_5_0(
     () => (
-        fn get_lineno<T>(
-            iseq_struct: &rb_iseq_constant_body,
+        fn get_stack_frame<T>(
+            iseq_struct: &rb_iseq_struct,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32> where T: ProcessMemory {
-            let pos = get_pos(iseq_struct, cfp)?;
-            let t_size = iseq_struct.line_info_size as usize;
-            if t_size == 0 {
-                Ok(0) //TODO: really?
-            } else if t_size == 1 {
-                let table: [iseq_line_info_entry; 1] = source.copy_struct(iseq_struct.line_info_table as usize)
-                    .context(iseq_struct.line_info_table as usize)?;
-                Ok(table[0].line_no)
-            } else {
-                let table: Vec<iseq_line_info_entry> = source.copy_vec(iseq_struct.line_info_table as usize, t_size as usize)
-                    .context(iseq_struct.line_info_table as usize)?;
-                for i in 0..t_size {
-                    if pos == table[i].position as usize {
-                        return Ok(table[i].line_no)
-                    } else if table[i].position as usize > pos {
-                        return Ok(table[i-1].line_no)
-                    }
+        ) -> Result<StackFrame> where T: ProcessMemory {
+            let body: rb_iseq_constant_body = source.copy_struct(iseq_struct.body as usize)
+                .context("couldn't copy rb_iseq_constant_body")?;
+            let rstring: RString = source.copy_struct(body.location.label as usize)
+                .context("couldn't copy RString")?;
+
+            let (path, absolute_path) = get_ruby_string_array(body.location.pathobj as usize, rstring.basic.klass as usize, source)?;
+            Ok(StackFrame{
+                name: get_ruby_string(body.location.label as usize, source)?,
+                relative_path: path,
+                absolute_path: Some(absolute_path),
+                lineno: match get_lineno(&body, cfp, source) {
+                    Ok(lineno) => Some(lineno),
+                    Err(e) => {
+                        warn!("couldn't get lineno: {}", e);
+                        None
+                    },
                 }
-                Ok(table[t_size-1].line_no)
-            }
+            })
         }
     )
 );
@@ -752,32 +862,125 @@ macro_rules! get_pos(
     )
 );
 
+macro_rules! get_lineno_1_9_0(
+    () => (
+        fn get_lineno<T>(
+            iseq_struct: &rb_iseq_struct,
+            cfp: &rb_control_frame_t,
+            source: &T,
+        ) -> Result<usize> where T: ProcessMemory {
+            let pos = get_pos(iseq_struct, cfp)?;
+            let t_size = iseq_struct.insn_info_size as usize;
+            if t_size == 0 {
+                Err(format_err!("line number is not available"))
+            } else if t_size == 1 {
+                let table: [iseq_insn_info_entry; 1] = source.copy_struct(iseq_struct.insn_info_table as usize)
+                    .context("couldn't copy instruction table")?;
+                Ok(table[0].line_no as usize)
+            } else {
+                let table: Vec<iseq_insn_info_entry> = source.copy_vec(iseq_struct.insn_info_table as usize, t_size as usize)
+                    .context("couldn't copy instruction table")?;
+                for i in 0..t_size {
+                    if pos == table[i].position as usize {
+                        return Ok(table[i].line_no as usize)
+                    } else if table[i].position as usize > pos {
+                        return Ok(table[i-1].line_no as usize)
+                    }
+                }
+                Ok(table[t_size-1].line_no as usize)
+            }
+        }
+    )
+);
+
+macro_rules! get_lineno_2_0_0(
+    () => (
+        fn get_lineno<T>(
+            iseq_struct: &rb_iseq_struct,
+            cfp: &rb_control_frame_t,
+            source: &T,
+        ) -> Result<usize> where T: ProcessMemory {
+            let pos = get_pos(iseq_struct, cfp)?;
+            let t_size = iseq_struct.line_info_size as usize;
+            if t_size == 0 {
+                Err(format_err!("line number is not available"))
+            } else if t_size == 1 {
+                let table: [iseq_line_info_entry; 1] = source.copy_struct(iseq_struct.line_info_table as usize)
+                    .context("couldn't copy instruction table")?;
+                Ok(table[0].line_no as usize)
+            } else {
+                let table: Vec<iseq_line_info_entry> = source.copy_vec(iseq_struct.line_info_table as usize, t_size as usize)
+                    .context("couldn't copy instruction table")?;
+                for i in 0..t_size {
+                    if pos == table[i].position as usize {
+                        return Ok(table[i].line_no as usize)
+                    } else if table[i].position as usize > pos {
+                        return Ok(table[i-1].line_no as usize)
+                    }
+                }
+                Ok(table[t_size-1].line_no as usize)
+            }
+        }
+    )
+);
+
+macro_rules! get_lineno_2_3_0(
+    () => (
+        fn get_lineno<T>(
+            iseq_struct: &rb_iseq_constant_body,
+            cfp: &rb_control_frame_t,
+            source: &T,
+        ) -> Result<usize> where T: ProcessMemory {
+            let pos = get_pos(iseq_struct, cfp)?;
+            let t_size = iseq_struct.line_info_size as usize;
+            if t_size == 0 {
+                Err(format_err!("line number is not available"))
+            } else if t_size == 1 {
+                let table: [iseq_line_info_entry; 1] = source.copy_struct(iseq_struct.line_info_table as usize)
+                    .context("couldn't copy instruction table")?;
+                Ok(table[0].line_no as usize)
+            } else {
+                let table: Vec<iseq_line_info_entry> = source.copy_vec(iseq_struct.line_info_table as usize, t_size as usize)
+                    .context("couldn't copy instruction table")?;
+                for i in 0..t_size {
+                    if pos == table[i].position as usize {
+                        return Ok(table[i].line_no as usize)
+                    } else if table[i].position as usize > pos {
+                        return Ok(table[i-1].line_no as usize)
+                    }
+                }
+                Ok(table[t_size-1].line_no as usize)
+            }
+        }
+    )
+);
+
 macro_rules! get_lineno_2_5_0(
     () => (
         fn get_lineno<T>(
             iseq_struct: &rb_iseq_constant_body,
             cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32> where T: ProcessMemory {
+        ) -> Result<usize> where T: ProcessMemory {
             let pos = get_pos(iseq_struct, cfp)?;
             let t_size = iseq_struct.insns_info_size as usize;
             if t_size == 0 {
-                Ok(0) //TODO: really?
+                Err(format_err!("line number is not available"))
             } else if t_size == 1 {
                 let table: [iseq_insn_info_entry; 1] = source.copy_struct(iseq_struct.insns_info as usize)
-                    .context(iseq_struct.insns_info as usize)?;
-                Ok(table[0].line_no as u32)
+                    .context("couldn't copy instruction table")?;
+                Ok(table[0].line_no as usize)
             } else {
                 let table: Vec<iseq_insn_info_entry> = source.copy_vec(iseq_struct.insns_info as usize, t_size as usize)
-                    .context(iseq_struct.insns_info as usize)?;
+                    .context("couldn't copy instruction table")?;
                 for i in 0..t_size {
                     if pos == table[i].position as usize {
-                        return Ok(table[i].line_no as u32)
+                        return Ok(table[i].line_no as usize)
                     } else if table[i].position as usize > pos {
-                        return Ok(table[i-1].line_no as u32)
+                        return Ok(table[i-1].line_no as usize)
                     }
                 }
-                Ok(table[t_size-1].line_no as u32)
+                Ok(table[t_size-1].line_no as usize)
             }
         }
     )
@@ -789,88 +992,21 @@ macro_rules! get_lineno_2_6_0(
             iseq_struct: &rb_iseq_constant_body,
             _cfp: &rb_control_frame_t,
             source: &T,
-        ) -> Result<u32> where T: ProcessMemory {
-            //let pos = get_pos(iseq_struct, cfp)?;
+        ) -> Result<usize> where T: ProcessMemory {
             let t_size = iseq_struct.insns_info.size as usize;
             if t_size == 0 {
-                Ok(0) //TODO: really?
+                Err(format_err!("line number is not available"))
             } else if t_size == 1 {
                 let table: [iseq_insn_info_entry; 1] = source.copy_struct(iseq_struct.insns_info.body as usize)
-                    .context(iseq_struct.insns_info.body as usize)?;
-                Ok(table[0].line_no as u32)
+                    .context("couldn't copy instruction table")?;
+                Ok(table[0].line_no as usize)
             } else {
+                // TODO: To handle this properly, we need to imitate ruby's succinct bit vector lookup.
+                // See https://github.com/rbspy/rbspy/issues/213#issuecomment-826363857
                 let table: Vec<iseq_insn_info_entry> = source.copy_vec(iseq_struct.insns_info.body as usize, t_size as usize)
                     .context(iseq_struct.insns_info.body as usize)?;
-                // TODO: fix this. I'm not sure why it doesn't extract the table properly.
-                /*let positions: Vec<usize> = source.copy_vec(iseq_struct.insns_info.positions as usize, t_size as usize)?;
-                for i in 0..t_size {
-                    if pos == positions[i] as usize {
-                        return Ok(table[i].line_no as u32)
-                    } else if positions[i] as usize > pos {
-                        return Ok(table[i-1].line_no as u32)
-                    }
-                }*/
-                Ok(table[t_size-1].line_no as u32)
+                Ok(table[t_size-1].line_no as usize)
             }
-        }
-    )
-);
-
-macro_rules! get_stack_frame_2_0_0(
-    () => (
-        fn get_stack_frame<T>(
-            iseq_struct: &rb_iseq_struct,
-            cfp: &rb_control_frame_t,
-            source: &T,
-        ) -> Result<StackFrame> where T: ProcessMemory {
-            Ok(StackFrame{
-                name: get_ruby_string(iseq_struct.location.label as usize, source)?,
-                relative_path: get_ruby_string(iseq_struct.location.path as usize, source)?,
-                absolute_path: Some(get_ruby_string(iseq_struct.location.absolute_path as usize, source)?),
-                lineno: get_lineno(iseq_struct, cfp, source)?,
-            })
-        }
-    )
-);
-
-macro_rules! get_stack_frame_2_3_0(
-    () => (
-        fn get_stack_frame<T>(
-            iseq_struct: &rb_iseq_struct,
-            cfp: &rb_control_frame_t,
-            source: &T,
-        ) -> Result<StackFrame> where T: ProcessMemory {
-            let body: rb_iseq_constant_body = source.copy_struct(iseq_struct.body as usize)
-                .context(iseq_struct.body as usize)?;
-            Ok(StackFrame{
-                name: get_ruby_string(body.location.label as usize, source)?,
-                relative_path: get_ruby_string(body.location.path as usize, source)?,
-                absolute_path: Some(get_ruby_string(body.location.absolute_path as usize, source)?),
-                lineno: get_lineno(&body, cfp, source)?,
-            })
-        }
-    )
-);
-
-macro_rules! get_stack_frame_2_5_0(
-    () => (
-        fn get_stack_frame<T>(
-            iseq_struct: &rb_iseq_struct,
-            cfp: &rb_control_frame_t,
-            source: &T,
-        ) -> Result<StackFrame> where T: ProcessMemory {
-            let body: rb_iseq_constant_body = source.copy_struct(iseq_struct.body as usize)
-                .context(iseq_struct.body as usize)?;
-            let rstring: RString = source.copy_struct(body.location.label as usize)
-                .context(body.location.label as usize)?;
-
-            let (path, absolute_path) = get_ruby_string_array(body.location.pathobj as usize, rstring.basic.klass as usize, source)?;
-            Ok(StackFrame{
-                name: get_ruby_string(body.location.label as usize, source)?,
-                relative_path: path,
-                absolute_path: Some(absolute_path),
-                lineno: get_lineno(&body, cfp, source)?,
-            })
         }
     )
 );
@@ -889,7 +1025,7 @@ macro_rules! get_cfps(
             }
             let cfp_size = (stack_base as usize - cfp_address) as usize / std::mem::size_of::<rb_control_frame_t>();
             if cfp_size > 1_000_000 {
-                return Err(crate::core::types::MemoryCopyError::Message(format!("invalid cfp vector length")).into());
+                return Err(crate::core::types::MemoryCopyError::Message(format!("invalid cfp vector length: {}", cfp_size)).into());
             }
 
             source.copy_vec(cfp_address, cfp_size).context("couldn't copy cfp vector")
@@ -1011,7 +1147,7 @@ macro_rules! get_cfunc_name(
             let mut ids_len = unsafe { ids.as_.heap.len as usize };
             if (flags & ruby_fl_type_RUBY_FL_USER1 as usize) > 0 {
                 ids_ptr = unsafe { ids.as_.ary[0] as usize };
-                ids_len = (flags & (ruby_fl_type_RUBY_FL_USER3|ruby_fl_type_RUBY_FL_USER4) as usize) >> (ruby_fl_type_RUBY_FL_USHIFT+3);
+                ids_len = (flags & (ruby_fl_type_RUBY_FL_USER3|ruby_fl_type_RUBY_FL_USER4|ruby_fl_type_RUBY_FL_USER5|ruby_fl_type_RUBY_FL_USER6|ruby_fl_type_RUBY_FL_USER7|ruby_fl_type_RUBY_FL_USER8|ruby_fl_type_RUBY_FL_USER9) as usize) >> (ruby_fl_type_RUBY_FL_USHIFT+3);
             }
             if idx >= ids_len {
                 return Err(format_err!("Invalid index in IDs array").into());
@@ -1124,6 +1260,7 @@ ruby_version_v3_1_x!(ruby_3_1_0);
 ruby_version_v3_1_x!(ruby_3_1_1);
 ruby_version_v3_1_x!(ruby_3_1_2);
 ruby_version_v3_1_x!(ruby_3_1_3);
+ruby_version_v3_2_x!(ruby_3_2_0);
 
 pub fn get_execution_context(version: &Version) -> crate::core::types::GetExecutionContextFn {
     let function = match version {
@@ -1637,6 +1774,12 @@ pub fn get_execution_context(version: &Version) -> crate::core::types::GetExecut
             patch: 3,
             ..
         } => ruby_3_1_3::get_execution_context,
+        Version {
+            major: 3,
+            minor: 2,
+            patch: 0,
+            ..
+        } => ruby_3_2_0::get_execution_context,
         _ => panic!(
             "Ruby version not supported yet: {}. Please create a GitHub issue and we'll fix it!",
             version
@@ -2158,6 +2301,12 @@ pub fn is_maybe_thread_function(version: &Version) -> crate::core::types::IsMayb
             patch: 3,
             ..
         } => ruby_3_1_3::is_maybe_thread,
+        Version {
+            major: 3,
+            minor: 2,
+            patch: 0,
+            ..
+        } => ruby_3_2_0::is_maybe_thread,
         _ => panic!(
             "Ruby version not supported yet: {}. Please create a GitHub issue and we'll fix it!",
             version
@@ -2678,6 +2827,12 @@ pub fn get_stack_trace_function(version: &Version) -> crate::core::types::StackT
             patch: 3,
             ..
         } => ruby_3_1_3::get_stack_trace,
+        Version {
+            major: 3,
+            minor: 2,
+            patch: 0,
+            ..
+        } => ruby_3_2_0::get_stack_trace,
         _ => panic!(
             "Ruby version not supported yet: {}. Please create a GitHub issue and we'll fix it!",
             version
@@ -2703,7 +2858,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 2,
+                lineno: Some(2),
             },
             StackFrame {
                 name: "bbb".to_string(),
@@ -2711,7 +2866,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 6,
+                lineno: Some(6),
             },
             StackFrame {
                 name: "ccc".to_string(),
@@ -2719,7 +2874,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 10,
+                lineno: Some(10),
             },
             StackFrame {
                 name: "block in <main>".to_string(),
@@ -2727,7 +2882,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 14,
+                lineno: Some(14),
             },
             StackFrame::unknown_c_function(),
             StackFrame::unknown_c_function(),
@@ -2737,7 +2892,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 13,
+                lineno: Some(13),
             },
             StackFrame::unknown_c_function(),
         ]
@@ -2749,37 +2904,37 @@ mod tests {
                 name: "sleep [c function]".to_string(),
                 relative_path: "(unknown)".to_string(),
                 absolute_path: None,
-                lineno: 0,
+                lineno: None,
             },
             StackFrame {
                 name: "aaa".to_string(),
                 relative_path: "ci/ruby-programs/infinite.rb".to_string(),
                 absolute_path: Some("/vagrant/ci/ruby-programs/infinite.rb".to_string()),
-                lineno: 3,
+                lineno: Some(3),
             },
             StackFrame {
                 name: "bbb".to_string(),
                 relative_path: "ci/ruby-programs/infinite.rb".to_string(),
                 absolute_path: Some("/vagrant/ci/ruby-programs/infinite.rb".to_string()),
-                lineno: 7,
+                lineno: Some(7),
             },
             StackFrame {
                 name: "ccc".to_string(),
                 relative_path: "ci/ruby-programs/infinite.rb".to_string(),
                 absolute_path: Some("/vagrant/ci/ruby-programs/infinite.rb".to_string()),
-                lineno: 11,
+                lineno: Some(11),
             },
             StackFrame {
                 name: "block in <main>".to_string(),
                 relative_path: "ci/ruby-programs/infinite.rb".to_string(),
                 absolute_path: Some("/vagrant/ci/ruby-programs/infinite.rb".to_string()),
-                lineno: 15,
+                lineno: Some(15),
             },
             StackFrame {
                 name: "loop [c function]".to_string(),
                 relative_path: "(unknown)".to_string(),
                 absolute_path: None,
-                lineno: 0,
+                lineno: None,
             },
         ]
     }
@@ -2790,7 +2945,7 @@ mod tests {
                 name: "sleep [c function]".to_string(),
                 relative_path: "(unknown)".to_string(),
                 absolute_path: None,
-                lineno: 0,
+                lineno: None,
             },
             StackFrame {
                 name: "aaa".to_string(),
@@ -2798,7 +2953,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/acj/workspace/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 3,
+                lineno: Some(3),
             },
             StackFrame {
                 name: "bbb".to_string(),
@@ -2806,7 +2961,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/acj/workspace/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 7,
+                lineno: Some(7),
             },
             StackFrame {
                 name: "ccc".to_string(),
@@ -2814,7 +2969,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/acj/workspace/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 11,
+                lineno: Some(11),
             },
             StackFrame {
                 name: "block in <main>".to_string(),
@@ -2822,13 +2977,70 @@ mod tests {
                 absolute_path: Some(
                     "/home/acj/workspace/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 15,
+                lineno: Some(15),
             },
             StackFrame {
                 name: "loop [c function]".to_string(),
                 relative_path: "(unknown)".to_string(),
                 absolute_path: None,
-                lineno: 0,
+                lineno: None,
+            },
+        ]
+    }
+
+    fn real_stack_trace_3_2_0() -> Vec<StackFrame> {
+        vec![
+            StackFrame {
+                name: "sleep [c function]".to_string(),
+                relative_path: "(unknown)".to_string(),
+                absolute_path: None,
+                lineno: None,
+            },
+            StackFrame {
+                name: "aaa".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/parallels/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
+                lineno: Some(3),
+            },
+            StackFrame {
+                name: "bbb".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/parallels/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
+                lineno: Some(7),
+            },
+            StackFrame {
+                name: "ccc".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/parallels/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
+                lineno: Some(11),
+            },
+            StackFrame {
+                name: "block in <main>".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/parallels/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
+                lineno: Some(15),
+            },
+            StackFrame {
+                name: "loop [c function]".to_string(),
+                relative_path: "(unknown)".to_string(),
+                absolute_path: None,
+                lineno: None,
+            },
+            StackFrame {
+                name: "<main>".to_string(),
+                relative_path: "ci/ruby-programs/infinite.rb".to_string(),
+                absolute_path: Some(
+                    "/home/parallels/rbspy/ci/ruby-programs/infinite.rb".to_string(),
+                ),
+                lineno: Some(13),
             },
         ]
     }
@@ -2842,7 +3054,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 2,
+                lineno: Some(2),
             },
             StackFrame {
                 name: "bbb".to_string(),
@@ -2850,7 +3062,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 6,
+                lineno: Some(6),
             },
             StackFrame {
                 name: "ccc".to_string(),
@@ -2858,7 +3070,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 10,
+                lineno: Some(10),
             },
             StackFrame {
                 name: "block in <main>".to_string(),
@@ -2866,7 +3078,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 14,
+                lineno: Some(14),
             },
             StackFrame::unknown_c_function(),
             StackFrame {
@@ -2875,7 +3087,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 13,
+                lineno: Some(13),
             },
         ]
     }
@@ -2889,7 +3101,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 2,
+                lineno: Some(2),
             },
             StackFrame {
                 name: "bbb".to_string(),
@@ -2897,7 +3109,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 6,
+                lineno: Some(6),
             },
             StackFrame {
                 name: "ccc".to_string(),
@@ -2905,7 +3117,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 10,
+                lineno: Some(10),
             },
             StackFrame {
                 name: "block in <main>".to_string(),
@@ -2913,7 +3125,7 @@ mod tests {
                 absolute_path: Some(
                     "/home/bork/work/rbspy/ci/ruby-programs/infinite.rb".to_string(),
                 ),
-                lineno: 14,
+                lineno: Some(14),
             },
             StackFrame::unknown_c_function(),
         ]
@@ -3262,5 +3474,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(real_stack_trace_3_1_0(), stack_trace.trace);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn test_get_ruby_stack_trace_3_2_0() {
+        let source = coredump_3_2_0();
+        let vm_addr = 0xffffb8034578;
+        let global_symbols_addr = Some(0xffffb8025340);
+        let stack_trace = ruby_version::ruby_3_2_0::get_stack_trace::<CoreDump>(
+            0,
+            vm_addr,
+            global_symbols_addr,
+            &source,
+            0,
+        )
+        .unwrap();
+        assert_eq!(real_stack_trace_3_2_0(), stack_trace.trace);
     }
 }

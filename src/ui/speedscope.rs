@@ -67,8 +67,8 @@ struct Shared {
 struct Frame {
     name: String,
     file: Option<String>,
-    line: Option<u32>,
-    col: Option<u32>,
+    line: Option<usize>,
+    col: Option<usize>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -142,7 +142,7 @@ impl Frame {
         Frame {
             name: stack_frame.name.clone(),
             file: Some(stack_frame.relative_path.clone()),
-            line: Some(stack_frame.lineno),
+            line: stack_frame.lineno,
             col: None,
         }
     }
