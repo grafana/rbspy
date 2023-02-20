@@ -1107,7 +1107,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rbspy"
+name = "rbspy-oncpu"
 version = "0.13.1"
 dependencies = [
  "anyhow",
