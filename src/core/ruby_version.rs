@@ -792,6 +792,126 @@ macro_rules! get_stack_frame_2_0_0(
     )
 );
 
+macro_rules! get_stack_frame_2_5_0(
+    () => (
+        fn get_stack_frame<T>(
+            iseq_struct: &rb_iseq_struct,
+            cfp: &rb_control_frame_t,
+            source: &T,
+        ) -> Result<StackFrame> where T: ProcessMemory {
+            let body: rb_iseq_constant_body = source.copy_struct(iseq_struct.body as usize)
+                .context("couldn't copy rb_iseq_constant_body")?;
+            let rstring: RString = source.copy_struct(body.location.label as usize)
+                .context("couldn't copy RString")?;
+
+            fn check_method_entry<T: ProcessMemory>(
+                source: &T,
+                raw_imemo: usize,
+                can_be_svar: bool
+            ) -> Result<*const rb_method_entry_struct> {
+                let imemo: rb_method_entry_struct = source.copy_struct(raw_imemo).context(raw_imemo)?;
+
+                // These type constants are defined in ruby's internal/imemo.h
+                #[allow(non_upper_case_globals)]
+                match ((imemo.flags >> 12) & 0x07) as u32 {
+                    imemo_type_imemo_ment => Ok(&imemo as *const rb_method_entry_struct),
+                    imemo_type_imemo_svar => {
+                        if (can_be_svar) {
+                            let svar: vm_svar = source.copy_struct(raw_imemo).context(raw_imemo)?;
+                            check_method_entry(source, svar.cref_or_me as usize, false)
+                        } else {
+                            Ok((0) as *const rb_method_entry_struct)
+                        }
+
+                    },
+                    _ => Ok((0) as *const rb_method_entry_struct)
+                }
+            }
+            fn get_method_entry_struct<T: ProcessMemory>(
+                source: &T,
+                cfp: &rb_control_frame_t,
+            ) -> Result<*const rb_method_entry_struct> {
+                let mut ep = cfp.ep as *const usize;
+                let mut env_flags: usize = source.copy_struct(ep as usize).context("env_flags")?;
+                let mut env_local: bool = env_flags & 0x02 != 0;
+
+
+                // #define VM_ENV_FLAG_LOCAL 0x02
+                while !env_local {
+                    println!("iter");
+                    let env_me_cref: usize = unsafe {
+                        source.copy_struct(ep.offset(-2) as usize).context("env_me_cref 1")?
+                    };
+                    let me = check_method_entry(source, env_me_cref, false)?;
+                    if !me.is_null() {
+                        return Ok(me);
+                    }
+                    let env_specval: usize = unsafe {
+                        source.copy_struct(ep.offset(-1) as usize).context(ep.offset(-1) as usize)?
+                    };
+                    ep = env_specval as *const usize;
+                    env_flags = source.copy_struct(ep as usize).context("env_flags")?;
+                    env_local = env_flags & 0x02 != 0;
+                }
+                let env_me_cref: usize = unsafe {
+                    source.copy_struct(ep.offset(-2) as usize).context("env_me_cref 1")?
+                };
+                let me = check_method_entry(source, env_me_cref, true)?;
+                if !me.is_null() {
+                    return Ok(me);
+                }
+                return Err(format_err!("check_method_entry null"))
+            }
+            let imemo = get_method_entry_struct(source, cfp);
+
+            match imemo {
+
+                Ok(imemo) => {
+                    println!("imemo ptr {:x}", imemo as usize);
+                    let imemo = match source.copy_struct(imemo as usize) {
+                        Ok(imemo) => {
+                            println!("imemo read ")
+                            imemo;
+                        }
+                        _ => {
+                            println!("imemo read err")
+                            let empty : rb_method_entry_struct
+                            rb_method_entry_struct{};
+                        }
+                    }
+
+                    // match imemob {
+                    //     Ok(imemos)  => {
+                    //         println!("imemo read ");
+                    //     }
+                    //     Error(r) => {
+                    //         println!("imemo read err");
+                    //     }
+                    // }
+                }
+                Err(r) => {
+                    println!("imemo err {}",r);
+                }
+            }
+
+
+            let (path, absolute_path) = get_ruby_string_array(body.location.pathobj as usize, rstring.basic.klass as usize, source)?;
+            Ok(StackFrame{
+                name: get_ruby_string(body.location.label as usize, source)?,
+                relative_path: path,
+                absolute_path: Some(absolute_path),
+                lineno: match get_lineno(&body, cfp, source) {
+                    Ok(lineno) => Some(lineno),
+                    Err(e) => {
+                        warn!("couldn't get lineno: {}", e);
+                        None
+                    },
+                }
+            })
+        }
+    )
+);
+
 macro_rules! get_stack_frame_2_3_0(
     () => (
         fn get_stack_frame<T>(
@@ -805,35 +925,6 @@ macro_rules! get_stack_frame_2_3_0(
                 name: get_ruby_string(body.location.label as usize, source)?,
                 relative_path: get_ruby_string(body.location.path as usize, source)?,
                 absolute_path: Some(get_ruby_string(body.location.absolute_path as usize, source)?),
-                lineno: match get_lineno(&body, cfp, source) {
-                    Ok(lineno) => Some(lineno),
-                    Err(e) => {
-                        warn!("couldn't get lineno: {}", e);
-                        None
-                    },
-                }
-            })
-        }
-    )
-);
-
-macro_rules! get_stack_frame_2_5_0(
-    () => (
-        fn get_stack_frame<T>(
-            iseq_struct: &rb_iseq_struct,
-            cfp: &rb_control_frame_t,
-            source: &T,
-        ) -> Result<StackFrame> where T: ProcessMemory {
-            let body: rb_iseq_constant_body = source.copy_struct(iseq_struct.body as usize)
-                .context("couldn't copy rb_iseq_constant_body")?;
-            let rstring: RString = source.copy_struct(body.location.label as usize)
-                .context("couldn't copy RString")?;
-
-            let (path, absolute_path) = get_ruby_string_array(body.location.pathobj as usize, rstring.basic.klass as usize, source)?;
-            Ok(StackFrame{
-                name: get_ruby_string(body.location.label as usize, source)?,
-                relative_path: path,
-                absolute_path: Some(absolute_path),
                 lineno: match get_lineno(&body, cfp, source) {
                     Ok(lineno) => Some(lineno),
                     Err(e) => {
