@@ -19,14 +19,3 @@ jobs:
           cargo login ${{ secrets.CARGO_TOKEN }}
           cd ruby-structs
           cargo publish
-  # publish-rbspy:
-  #   name: Publish rbspy crate
-  #   needs: [publish-ruby-structs]
-  #   runs-on: ubuntu-22.04
-  #   steps:
-  #     - uses: actions/checkout@v1
-  #     - uses: dtolnay/rust-toolchain@984d158d699777abbaa79de23de3134e60c187fa # stable branch
-  #     - name: publish rbspy crate
-  #       run: |
-  #         cargo login ${{ secrets.CARGO_TOKEN }}
-  #         cargo publish
