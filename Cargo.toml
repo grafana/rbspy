@@ -1,5 +1,5 @@
 [package]
-name = "rbspy"
+name = "pyroscope-rbspy-oncpu"
 version = "0.17.0"
 authors = ["Adam Jensen <acjensen@gmail.com>", "Julia Evans <julia@jvns.ca>"]
 description = "Sampling CPU profiler for Ruby"

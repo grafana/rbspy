@@ -1060,6 +1060,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyroscope-rbspy-oncpu"
+version = "0.17.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "chrono",
+ "clap",
+ "ctrlc",
+ "directories",
+ "env_logger 0.10.0",
+ "flate2",
+ "goblin",
+ "inferno",
+ "lazy_static",
+ "libc",
+ "libproc 0.13.0",
+ "log",
+ "memmap2",
+ "nix 0.26.2",
+ "proc-maps",
+ "prost",
+ "rand",
+ "rbspy-ruby-structs",
+ "rbspy-testdata",
+ "remoteprocess",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "spytools",
+ "tempfile",
+ "term_size",
+ "thiserror",
+ "winapi",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1105,43 +1142,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom",
-]
-
-[[package]]
-name = "rbspy"
-version = "0.17.0"
-dependencies = [
- "anyhow",
- "byteorder",
- "chrono",
- "clap",
- "ctrlc",
- "directories",
- "env_logger 0.10.0",
- "flate2",
- "goblin",
- "inferno",
- "lazy_static",
- "libc",
- "libproc 0.13.0",
- "log",
- "memmap2",
- "nix 0.26.2",
- "proc-maps",
- "prost",
- "rand",
- "rbspy-ruby-structs",
- "rbspy-testdata",
- "remoteprocess",
- "semver",
- "serde",
- "serde_derive",
- "serde_json",
- "spytools",
- "tempfile",
- "term_size",
- "thiserror",
- "winapi",
 ]
 
 [[package]]
